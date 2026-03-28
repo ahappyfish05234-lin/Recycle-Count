@@ -1,0 +1,79 @@
+{
+  "entities": {
+    "RecyclingEntry": {
+      "title": "Recycling Entry",
+      "description": "A daily record of recycling income.",
+      "type": "object",
+      "properties": {
+        "uid": {
+          "type": "string",
+          "description": "The user ID of the owner."
+        },
+        "date": {
+          "type": "string",
+          "format": "date",
+          "description": "The date of the entry (YYYY-MM-DD)."
+        },
+        "paper_weight": { "type": "number", "description": "Weight of paper." },
+        "paper_price": { "type": "number", "description": "Unit price of paper." },
+        "paper_amount": { "type": "number", "description": "Total amount for paper." },
+        "bottles_weight": { "type": "number", "description": "Weight of bottles/cans." },
+        "bottles_price": { "type": "number", "description": "Unit price of bottles/cans." },
+        "bottles_amount": { "type": "number", "description": "Total amount for bottles/cans." },
+        "iron_cans_weight": { "type": "number", "description": "Weight of iron cans." },
+        "iron_cans_price": { "type": "number", "description": "Unit price of iron cans." },
+        "iron_cans_amount": { "type": "number", "description": "Total amount for iron cans." },
+        "aluminum_cans_weight": { "type": "number", "description": "Weight of aluminum cans." },
+        "aluminum_cans_price": { "type": "number", "description": "Unit price of aluminum cans." },
+        "aluminum_cans_amount": { "type": "number", "description": "Total amount for aluminum cans." },
+        "plastic_weight": { "type": "number", "description": "Weight of plastic." },
+        "plastic_price": { "type": "number", "description": "Unit price of plastic." },
+        "plastic_amount": { "type": "number", "description": "Total amount for plastic." },
+        "appliances_weight": { "type": "number", "description": "Weight of appliances." },
+        "appliances_price": { "type": "number", "description": "Unit price of appliances." },
+        "appliances_amount": { "type": "number", "description": "Total amount for appliances." },
+        "iron_weight": { "type": "number", "description": "Weight of iron." },
+        "iron_price": { "type": "number", "description": "Unit price of iron." },
+        "iron_amount": { "type": "number", "description": "Total amount for iron." },
+        "aluminum_weight": { "type": "number", "description": "Weight of aluminum." },
+        "aluminum_price": { "type": "number", "description": "Unit price of aluminum." },
+        "aluminum_amount": { "type": "number", "description": "Total amount for aluminum." },
+        "newspaper_weight": { "type": "number", "description": "Weight of newspaper." },
+        "newspaper_price": { "type": "number", "description": "Unit price of newspaper." },
+        "newspaper_amount": { "type": "number", "description": "Total amount for newspaper." },
+        "dialysis_buckets_count": { "type": "number", "description": "Count of dialysis buckets." },
+        "dialysis_buckets_price": { "type": "number", "description": "Unit price of dialysis buckets." },
+        "dialysis_buckets_amount": { "type": "number", "description": "Total amount for dialysis buckets." },
+        "waste_oil_weight": { "type": "number", "description": "Weight of waste oil." },
+        "waste_oil_price": { "type": "number", "description": "Unit price of waste oil." },
+        "waste_oil_amount": { "type": "number", "description": "Total amount for waste oil." },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "When the entry was created."
+        }
+      },
+      "required": [
+        "uid", "date", 
+        "paper_weight", "paper_price", "paper_amount",
+        "bottles_weight", "bottles_price", "bottles_amount",
+        "iron_cans_weight", "iron_cans_price", "iron_cans_amount",
+        "aluminum_cans_weight", "aluminum_cans_price", "aluminum_cans_amount",
+        "plastic_weight", "plastic_price", "plastic_amount",
+        "appliances_weight", "appliances_price", "appliances_amount",
+        "iron_weight", "iron_price", "iron_amount",
+        "aluminum_weight", "aluminum_price", "aluminum_amount",
+        "newspaper_weight", "newspaper_price", "newspaper_amount",
+        "dialysis_buckets_count", "dialysis_buckets_price", "dialysis_buckets_amount",
+        "waste_oil_weight", "waste_oil_price", "waste_oil_amount",
+        "createdAt"
+      ]
+    }
+  },
+  "firestore": {
+    "/recycling_entries/{entryId}": {
+      "schema": "RecyclingEntry",
+      "description": "Collection of daily recycling income records."
+    }
+  }
+}

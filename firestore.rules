@@ -1,0 +1,128 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: recycling_entries
+    // Document ID: auto-generated
+    // Fields:
+    //   - uid: string (required) - User ID of the owner
+    //   - date: string (required) - Entry date (YYYY-MM-DD)
+    //   - plastic_weight: number (required) - Weight of plastic
+    //   - plastic_price: number (required) - Unit price of plastic
+    //   - plastic_amount: number (required) - Total amount for plastic
+    //   - metal_weight: number (required) - Weight of metal
+    //   - metal_price: number (required) - Unit price of metal
+    //   - metal_amount: number (required) - Total amount for metal
+    //   - pet_weight: number (required) - Weight of PET bottles
+    //   - pet_price: number (required) - Unit price of PET bottles
+    //   - pet_amount: number (required) - Total amount for PET bottles
+    //   - paper_weight: number (required) - Weight of paper
+    //   - paper_price: number (required) - Unit price of paper
+    //   - paper_amount: number (required) - Total amount for paper
+    //   - createdAt: timestamp (required) - Creation time
+    //
+    // ===============================================================
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isDocOwner() {
+      return isAuthenticated() && request.auth.uid == resource.data.uid;
+    }
+
+    function isValidRecyclingEntry(data) {
+      return data.keys().hasAll([
+        'uid', 'date', 'createdAt',
+        'paper_weight', 'paper_price', 'paper_amount',
+        'bottles_weight', 'bottles_price', 'bottles_amount',
+        'iron_cans_weight', 'iron_cans_price', 'iron_cans_amount',
+        'aluminum_cans_weight', 'aluminum_cans_price', 'aluminum_cans_amount',
+        'plastic_weight', 'plastic_price', 'plastic_amount',
+        'appliances_weight', 'appliances_price', 'appliances_amount',
+        'iron_weight', 'iron_price', 'iron_amount',
+        'aluminum_weight', 'aluminum_price', 'aluminum_amount',
+        'newspaper_weight', 'newspaper_price', 'newspaper_amount',
+        'dialysis_buckets_count', 'dialysis_buckets_price', 'dialysis_buckets_amount',
+        'waste_oil_weight', 'waste_oil_price', 'waste_oil_amount'
+      ]) &&
+             data.uid is string &&
+             data.date is string &&
+             data.date.matches('^\\d{4}-\\d{2}-\\d{2}$') &&
+             data.paper_weight is number && data.paper_weight >= 0 &&
+             data.paper_price is number && data.paper_price >= 0 &&
+             data.paper_amount is number && data.paper_amount >= 0 &&
+             data.bottles_weight is number && data.bottles_weight >= 0 &&
+             data.bottles_price is number && data.bottles_price >= 0 &&
+             data.bottles_amount is number && data.bottles_amount >= 0 &&
+             data.iron_cans_weight is number && data.iron_cans_weight >= 0 &&
+             data.iron_cans_price is number && data.iron_cans_price >= 0 &&
+             data.iron_cans_amount is number && data.iron_cans_amount >= 0 &&
+             data.aluminum_cans_weight is number && data.aluminum_cans_weight >= 0 &&
+             data.aluminum_cans_price is number && data.aluminum_cans_price >= 0 &&
+             data.aluminum_cans_amount is number && data.aluminum_cans_amount >= 0 &&
+             data.plastic_weight is number && data.plastic_weight >= 0 &&
+             data.plastic_price is number && data.plastic_price >= 0 &&
+             data.plastic_amount is number && data.plastic_amount >= 0 &&
+             data.appliances_weight is number && data.appliances_weight >= 0 &&
+             data.appliances_price is number && data.appliances_price >= 0 &&
+             data.appliances_amount is number && data.appliances_amount >= 0 &&
+             data.iron_weight is number && data.iron_weight >= 0 &&
+             data.iron_price is number && data.iron_price >= 0 &&
+             data.iron_amount is number && data.iron_amount >= 0 &&
+             data.aluminum_weight is number && data.aluminum_weight >= 0 &&
+             data.aluminum_price is number && data.aluminum_price >= 0 &&
+             data.aluminum_amount is number && data.aluminum_amount >= 0 &&
+             data.newspaper_weight is number && data.newspaper_weight >= 0 &&
+             data.newspaper_price is number && data.newspaper_price >= 0 &&
+             data.newspaper_amount is number && data.newspaper_amount >= 0 &&
+             data.dialysis_buckets_count is number && data.dialysis_buckets_count >= 0 &&
+             data.dialysis_buckets_price is number && data.dialysis_buckets_price >= 0 &&
+             data.dialysis_buckets_amount is number && data.dialysis_buckets_amount >= 0 &&
+             data.waste_oil_weight is number && data.waste_oil_weight >= 0 &&
+             data.waste_oil_price is number && data.waste_oil_price >= 0 &&
+             data.waste_oil_amount is number && data.waste_oil_amount >= 0 &&
+             data.createdAt is timestamp;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() &&
+        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+          (request.auth.token.email == "ahappyfish05234@gmail.com" && request.auth.token.email_verified == true)); // Default admin
+    }
+
+    match /users/{userId} {
+      allow read: if isOwner(userId) || isAdmin();
+      allow create: if isAuthenticated() && isOwner(userId) && 
+                      request.resource.data.keys().hasAll(['uid', 'email', 'role']) &&
+                      request.resource.data.role == 'client'; // Default role
+      allow update: if (isOwner(userId) || isAdmin()) && 
+                      (request.resource.data.role == resource.data.role || isAdmin());
+    }
+
+    match /recycling_entries/{entryId} {
+      allow read: if isDocOwner() || isAdmin();
+      allow create: if isAuthenticated() && 
+                      request.resource.data.uid == request.auth.uid &&
+                      isValidRecyclingEntry(request.resource.data);
+      allow update: if (isDocOwner() || isAdmin()) && 
+                      request.resource.data.uid == resource.data.uid &&
+                      isValidRecyclingEntry(request.resource.data);
+      allow delete: if isDocOwner() || isAdmin();
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

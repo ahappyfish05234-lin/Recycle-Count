@@ -1,0 +1,5 @@
+{
+  "name": "回收金追蹤器",
+  "description": "記錄每日回收項目的收入，包括塑膠、金屬、寶特瓶和紙類，並提供月度報表和年度趨勢分析。",
+  "requestFramePermissions": []
+}
