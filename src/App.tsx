@@ -136,6 +136,7 @@ function cn(...inputs: ClassValue[]) {
 interface RecyclingEntry {
   id: string;
   date: string;
+  type?: 'daily' | 'monthly';
   paper_weight: number;
   paper_price: number;
   paper_amount: number;
@@ -199,7 +200,26 @@ export default function App() {
       [`${cat.id}_price`]: ''
     }), {})
   );
-  const [view, setView] = useState<'daily' | 'monthly' | 'yearly'>('daily');
+  const [view, setView] = useState<'daily' | 'monthly' | 'yearly' | 'comparison'>('daily');
+  const [comparisonCategory, setComparisonCategory] = useState<string>('all');
+  const [selectedComparisonYears, setSelectedComparisonYears] = useState<number[]>([]);
+
+  const availableYears = useMemo(() => {
+    const years = new Set<number>();
+    entries.forEach(e => {
+      const y = parseISO(e.date).getFullYear();
+      if (!isNaN(y)) years.add(y);
+    });
+    return Array.from(years).sort((a, b) => b - a);
+  }, [entries]);
+
+  // Initialize selected years when availableYears changes
+  useEffect(() => {
+    if (availableYears.length > 0 && selectedComparisonYears.length === 0) {
+      setSelectedComparisonYears(availableYears.slice(0, 3).sort());
+    }
+  }, [availableYears, selectedComparisonYears.length]);
+  const [entryType, setEntryType] = useState<'daily' | 'monthly'>('daily');
   const [currentMonth, setCurrentMonth] = useState(new Date());
   const [showReceipt, setShowReceipt] = useState<RecyclingEntry | null>(null);
   const [hasPrefilled, setHasPrefilled] = useState(false);
@@ -290,10 +310,13 @@ export default function App() {
         // 1. Find the date
         let date = new Date(currentMonth);
         let dateFound = false;
+        let isMonthly = false;
 
-        // Try YYYY/M/D or M/D
+        // Try YYYY/M/D or M/D or YYYY/M or M月
         const fullDateMatch = line.match(/(\d{4})[/-](\d+)[/-](\d+)/);
+        const monthOnlyMatch = line.match(/(\d{4})[/-](\d+)(?!\d)/); // YYYY/MM but not YYYY/MM/DD
         const shortDateMatch = line.match(/(\d+)[月/](\d+)[日]?/);
+        const shortMonthMatch = line.match(/(\d+)月(?![日\d])/);
 
         if (fullDateMatch) {
           const y = parseInt(fullDateMatch[1]);
@@ -302,6 +325,13 @@ export default function App() {
           date = new Date(y, m, d);
           dateFound = true;
           dateStr = fullDateMatch[0];
+        } else if (monthOnlyMatch) {
+          const y = parseInt(monthOnlyMatch[1]);
+          const m = parseInt(monthOnlyMatch[2]) - 1;
+          date = new Date(y, m, 1);
+          dateFound = true;
+          isMonthly = true;
+          dateStr = monthOnlyMatch[0];
         } else if (shortDateMatch) {
           const m = parseInt(shortDateMatch[1]) - 1;
           const d = parseInt(shortDateMatch[2]);
@@ -309,6 +339,13 @@ export default function App() {
           date = setDate(date, d);
           dateFound = true;
           dateStr = shortDateMatch[0];
+        } else if (shortMonthMatch) {
+          const m = parseInt(shortMonthMatch[1]) - 1;
+          date = setMonth(date, m);
+          date = setDate(date, 1);
+          dateFound = true;
+          isMonthly = true;
+          dateStr = shortMonthMatch[0];
         }
 
         if (!dateFound) continue;
@@ -318,28 +355,21 @@ export default function App() {
         const foundCat = sortedCategories.find(c => line.includes(c.label));
         if (foundCat) category = foundCat;
 
-        // 3. Find price, weight, and total
+        // 3. Find price and weight (Total is calculated by system)
         // Remove commas from the line to handle numbers like 2,049 correctly
         let cleanLine = line.replace(dateStr, '').replace(category.label, '').replace(/,/g, '');
         const numbers = cleanLine.match(/\d+\.?\d*/g);
 
-        let providedTotal = NaN;
         if (numbers && numbers.length >= 2) {
-          // Order: Price, Weight, [Total]
+          // Order: Price, Weight
           price = parseFloat(numbers[0]);
           weight = parseFloat(numbers[1]);
-          if (numbers.length >= 3) {
-            providedTotal = parseFloat(numbers[2]);
-          }
         } else {
           // Fallback to parts if regex fails
           const numericParts = parts.filter(p => !isNaN(parseFloat(p.replace(/,/g, ''))) && !p.includes('/') && !p.includes('月'));
           if (numericParts.length >= 2) {
             price = parseFloat(numericParts[0].replace(/,/g, ''));
             weight = parseFloat(numericParts[1].replace(/,/g, ''));
-            if (numericParts.length >= 3) {
-              providedTotal = parseFloat(numericParts[2].replace(/,/g, ''));
-            }
           }
         }
 
@@ -350,6 +380,7 @@ export default function App() {
         const entry: any = {
           uid: user.uid,
           date: formattedDate,
+          type: isMonthly ? 'monthly' : 'daily',
           createdAt: serverTimestamp()
         };
 
@@ -370,8 +401,8 @@ export default function App() {
 
         entry[qtyKey] = weight;
         entry[priceKey] = price;
-        // Use provided total if available, otherwise calculate
-        entry[amountKey] = !isNaN(providedTotal) ? providedTotal : Number((weight * price).toFixed(2));
+        // System automatically calculates total
+        entry[amountKey] = Number((weight * price).toFixed(2));
 
         const docRef = doc(collection(db, 'recycling_entries'));
         batch.set(docRef, entry);
@@ -474,7 +505,8 @@ export default function App() {
 
     const entry: any = {
       uid: user.uid,
-      date: selectedDate,
+      date: entryType === 'monthly' ? format(startOfMonth(parseISO(selectedDate)), 'yyyy-MM-dd') : selectedDate,
+      type: entryType,
       createdAt: serverTimestamp()
     };
 
@@ -515,10 +547,11 @@ export default function App() {
     const start = startOfMonth(currentMonth);
     const end = endOfMonth(currentMonth);
     const days = eachDayOfInterval({ start, end });
+    const monthStr = format(currentMonth, 'yyyy-MM');
 
-    return days.map(day => {
+    const daily = days.map(day => {
       const dateStr = format(day, 'yyyy-MM-dd');
-      const dayEntries = entries.filter(e => e.date === dateStr);
+      const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'monthly');
       const data: any = {
         date: format(day, 'MM/dd'),
         totalAmount: 0
@@ -536,6 +569,24 @@ export default function App() {
       
       return data;
     });
+
+    const monthlyEntry = entries.find(e => e.date.startsWith(monthStr) && e.type === 'monthly');
+    let monthlyTotal: any = null;
+    if (monthlyEntry) {
+      monthlyTotal = {
+        date: '月度總計(補登)',
+        totalAmount: 0
+      };
+      CATEGORIES.forEach(cat => {
+        const qtyKey = `${cat.id}_${cat.isCount ? 'count' : 'weight'}`;
+        const amountKey = `${cat.id}_amount`;
+        monthlyTotal[cat.id] = (monthlyEntry as any)[qtyKey] || 0;
+        monthlyTotal[`${cat.id}_amount`] = (monthlyEntry as any)[amountKey] || 0;
+        monthlyTotal.totalAmount += (monthlyEntry as any)[amountKey] || 0;
+      });
+    }
+
+    return { daily, monthlyTotal };
   }, [entries, currentMonth]);
 
   const yearlyTrend = useMemo(() => {
@@ -552,7 +603,7 @@ export default function App() {
       };
       
       CATEGORIES.forEach(cat => {
-        const amount = monthEntries.reduce((sum, e) => sum + (e as any)[`${cat.id}_amount`], 0);
+        const amount = monthEntries.reduce((sum, e) => sum + ((e as any)[`${cat.id}_amount`] || 0), 0);
         data[cat.id] = amount;
         data.total += amount;
       });
@@ -560,6 +611,29 @@ export default function App() {
       return data;
     });
   }, [entries, currentMonth]);
+
+  const comparisonData = useMemo(() => {
+    const months = Array.from({ length: 12 }, (_, i) => i + 1);
+
+    return months.map(m => {
+      const data: any = { month: `${m}月` };
+      selectedComparisonYears.forEach(y => {
+        const yearMonth = `${y}-${String(m).padStart(2, '0')}`;
+        const monthEntries = entries.filter(e => e.date.startsWith(yearMonth));
+        
+        if (comparisonCategory === 'all') {
+          data[y] = monthEntries.reduce((sum, e) => {
+            return sum + CATEGORIES.reduce((s, cat) => s + ((e as any)[`${cat.id}_amount`] || 0), 0);
+          }, 0);
+        } else {
+          const cat = CATEGORIES.find(c => c.id === comparisonCategory);
+          const qtyKey = cat?.isCount ? `${comparisonCategory}_count` : `${comparisonCategory}_weight`;
+          data[y] = monthEntries.reduce((sum, e) => sum + ((e as any)[qtyKey] || 0), 0);
+        }
+      });
+      return data;
+    });
+  }, [entries, selectedComparisonYears, comparisonCategory]);
 
   if (loading) {
     return (
@@ -621,11 +695,12 @@ export default function App() {
 
       <main className="max-w-5xl mx-auto px-4 py-8">
         {/* Navigation Tabs */}
-        <div className="flex bg-white p-1 rounded-2xl shadow-sm mb-8 max-w-md mx-auto">
+        <div className="flex bg-white p-1 rounded-2xl shadow-sm mb-8 max-w-lg mx-auto">
           {[
             { id: 'daily', label: '每日記錄' },
             { id: 'monthly', label: '月度報表' },
-            { id: 'yearly', label: '年度趨勢' }
+            { id: 'yearly', label: '年度趨勢' },
+            { id: 'comparison', label: '年度比較' }
           ].map((v) => (
             <button
               key={v.id}
@@ -651,17 +726,49 @@ export default function App() {
             >
               {/* Entry Form */}
               <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
-                <h2 className="text-2xl font-serif font-bold mb-6 flex items-center gap-2">
-                  <Plus className="w-6 h-6 text-emerald-600" />
-                  新增回收記錄
-                </h2>
+                <div className="flex items-center justify-between mb-6">
+                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
+                    <Plus className="w-6 h-6 text-emerald-600" />
+                    新增回收記錄
+                  </h2>
+                  <div className="flex bg-gray-100 p-1 rounded-xl">
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('daily')}
+                      className={cn(
+                        "px-4 py-1.5 text-xs font-bold rounded-lg transition-all",
+                        entryType === 'daily' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500"
+                      )}
+                    >
+                      每日明細
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setEntryType('monthly')}
+                      className={cn(
+                        "px-4 py-1.5 text-xs font-bold rounded-lg transition-all",
+                        entryType === 'monthly' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500"
+                      )}
+                    >
+                      月度總計
+                    </button>
+                  </div>
+                </div>
                 <form onSubmit={handleSubmit} className="space-y-6">
                   <div className="max-w-xs space-y-2">
-                    <label className="text-sm font-medium text-gray-700">日期</label>
+                    <label className="text-sm font-medium text-gray-700">
+                      {entryType === 'daily' ? '日期' : '月份'}
+                    </label>
                     <input
-                      type="date"
-                      value={selectedDate}
-                      onChange={(e) => setSelectedDate(e.target.value)}
+                      type={entryType === 'daily' ? "date" : "month"}
+                      value={entryType === 'daily' ? selectedDate : selectedDate.substring(0, 7)}
+                      onChange={(e) => {
+                        if (entryType === 'daily') {
+                          setSelectedDate(e.target.value);
+                        } else {
+                          setSelectedDate(`${e.target.value}-01`);
+                        }
+                      }}
                       className="w-full p-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
                       required
                     />
@@ -808,7 +915,7 @@ export default function App() {
 
                 <div className="h-[300px] w-full mb-8">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyData}>
+                    <BarChart data={monthlyData.daily}>
                       <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
                       <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
                       <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
@@ -851,7 +958,7 @@ export default function App() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50">
-                      {monthlyData.filter(d => d.totalAmount > 0).map((day, idx) => (
+                      {monthlyData.daily.filter(d => d.totalAmount > 0).map((day, idx) => (
                         <tr key={idx} className="hover:bg-gray-50 transition-colors">
                           <td className="py-4 pl-2 font-medium text-xs whitespace-nowrap">{day.date}</td>
                           {CATEGORIES.map(cat => (
@@ -862,17 +969,35 @@ export default function App() {
                           <td className="py-4 pr-2 text-right font-bold text-emerald-600 text-xs">${day.totalAmount.toFixed(2)}</td>
                         </tr>
                       ))}
+                      {monthlyData.monthlyTotal && (
+                        <tr className="bg-amber-50/50 italic">
+                          <td className="py-4 pl-2 font-bold text-xs whitespace-nowrap text-amber-700">{monthlyData.monthlyTotal.date}</td>
+                          {CATEGORIES.map(cat => (
+                            <td key={cat.id} className="py-4 px-2 text-[10px] text-amber-700 font-medium">
+                              {monthlyData.monthlyTotal[cat.id] > 0 ? monthlyData.monthlyTotal[cat.id].toFixed(1) : '-'}
+                            </td>
+                          ))}
+                          <td className="py-4 pr-2 text-right font-bold text-amber-700 text-xs">${monthlyData.monthlyTotal.totalAmount.toFixed(2)}</td>
+                        </tr>
+                      )}
                     </tbody>
                     <tfoot>
                       <tr className="bg-emerald-50 font-bold">
                         <td className="py-4 pl-2 rounded-l-2xl text-xs">總結</td>
-                        {CATEGORIES.map(cat => (
-                          <td key={cat.id} className="py-4 px-2 text-[10px]">
-                            {monthlyData.reduce((s, d) => s + d[cat.id], 0).toFixed(1)}
-                          </td>
-                        ))}
+                        {CATEGORIES.map(cat => {
+                          const dailySum = monthlyData.daily.reduce((s, d) => s + d[cat.id], 0);
+                          const monthlySum = monthlyData.monthlyTotal ? monthlyData.monthlyTotal[cat.id] : 0;
+                          return (
+                            <td key={cat.id} className="py-4 px-2 text-[10px]">
+                              {(dailySum + monthlySum).toFixed(1)}
+                            </td>
+                          );
+                        })}
                         <td className="py-4 pr-2 text-right rounded-r-2xl text-emerald-700 text-xs">
-                          ${monthlyData.reduce((s, d) => s + d.totalAmount, 0).toFixed(2)}
+                          ${(
+                            monthlyData.daily.reduce((s, d) => s + d.totalAmount, 0) + 
+                            (monthlyData.monthlyTotal ? monthlyData.monthlyTotal.totalAmount : 0)
+                          ).toFixed(2)}
                         </td>
                       </tr>
                     </tfoot>
@@ -953,6 +1078,129 @@ export default function App() {
               </div>
             </motion.div>
           )}
+          {view === 'comparison' && (
+            <motion.div
+              key="comparison"
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="space-y-8"
+            >
+              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
+                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
+                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
+                    <TrendingUp className="w-6 h-6 text-emerald-600" />
+                    年度數據比較
+                  </h2>
+                  <div className="flex flex-wrap items-center gap-3">
+                    <select 
+                      value={comparisonCategory}
+                      onChange={(e) => setComparisonCategory(e.target.value)}
+                      className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      <option value="all">全部項目 (金額)</option>
+                      {CATEGORIES.map(cat => (
+                        <option key={cat.id} value={cat.id}>{cat.label} ({cat.isCount ? '數量' : '重量'})</option>
+                      ))}
+                    </select>
+                    <div className="flex flex-wrap items-center gap-2 bg-gray-50 p-1 rounded-2xl border border-gray-200">
+                      {availableYears.map(year => (
+                        <button
+                          key={year}
+                          onClick={() => {
+                            if (selectedComparisonYears.includes(year)) {
+                              setSelectedComparisonYears(selectedComparisonYears.filter(y => y !== year));
+                            } else {
+                              setSelectedComparisonYears([...selectedComparisonYears, year].sort());
+                            }
+                          }}
+                          className={cn(
+                            "px-3 py-1.5 text-xs font-bold rounded-xl transition-all",
+                            selectedComparisonYears.includes(year) 
+                              ? "bg-white text-emerald-600 shadow-sm" 
+                              : "text-gray-400 hover:text-gray-600"
+                          )}
+                        >
+                          {year}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="h-[400px] w-full mb-8">
+                  <ResponsiveContainer width="100%" height="100%">
+                    <BarChart data={comparisonData}>
+                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
+                      <XAxis dataKey="month" axisLine={false} tickLine={false} />
+                      <YAxis axisLine={false} tickLine={false} />
+                      <Tooltip 
+                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
+                        formatter={(value: any, name: string) => {
+                          const unit = comparisonCategory === 'all' ? '$' : (CATEGORIES.find(c => c.id === comparisonCategory)?.isCount ? '個' : 'kg');
+                          return [comparisonCategory === 'all' ? `$${value.toFixed(0)}` : `${value.toFixed(1)} ${unit}`, name];
+                        }}
+                      />
+                      <Legend iconType="circle" />
+                      {selectedComparisonYears.map((year, idx) => {
+                        const colors = ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#8b5cf6', '#ec4899'];
+                        return (
+                          <Bar 
+                            key={year}
+                            name={`${year}年`} 
+                            dataKey={year.toString()} 
+                            fill={colors[idx % colors.length]} 
+                            radius={[4, 4, 0, 0]} 
+                          />
+                        );
+                      })}
+                    </BarChart>
+                  </ResponsiveContainer>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-left border-collapse">
+                    <thead>
+                      <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">
+                        <th className="pb-4 pl-2">月份</th>
+                        {selectedComparisonYears.map(year => (
+                          <th key={year} className="pb-4 px-2 text-right">{year}年</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-50">
+                      {comparisonData.map((row, idx) => (
+                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
+                          <td className="py-4 pl-2 font-medium text-xs">{row.month}</td>
+                          {selectedComparisonYears.map(year => (
+                            <td key={year} className="py-4 px-2 text-right text-xs font-mono">
+                              {comparisonCategory === 'all' ? `$${(row[year] || 0).toFixed(0)}` : (row[year] || 0).toFixed(1)}
+                            </td>
+                          ))}
+                        </tr>
+                      ))}
+                    </tbody>
+                    <tfoot>
+                      <tr className="bg-gray-50 font-bold">
+                        <td className="py-4 pl-2 rounded-l-2xl text-xs">年度總計</td>
+                        {selectedComparisonYears.map(year => {
+                          const total = comparisonData.reduce((sum, row) => sum + (row[year] || 0), 0);
+                          return (
+                            <td key={year} className={cn(
+                              "py-4 px-2 text-right text-sm",
+                              year === 2025 ? "text-emerald-600" : "text-gray-900"
+                            )}>
+                              {comparisonCategory === 'all' ? `$${total.toLocaleString()}` : total.toFixed(1)}
+                            </td>
+                          );
+                        })}
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            </motion.div>
+          )}
         </AnimatePresence>
       </main>
 
@@ -981,7 +1229,7 @@ export default function App() {
                   <h2 className="text-2xl font-bold tracking-[0.2em] mb-1">仟環資源回收</h2>
                   <div className="flex justify-between text-xs border-b border-[#4a3f2a]/30 pb-2">
                     <span>寶號: {user?.displayName}</span>
-                    <span>{format(parseISO(showReceipt.date), 'yyyy年 MM月 dd日')}</span>
+                    <span>{showReceipt.type === 'monthly' ? format(parseISO(showReceipt.date), 'yyyy年 MM月') : format(parseISO(showReceipt.date), 'yyyy年 MM月 dd日')}</span>
                   </div>
                 </div>
 
@@ -1089,8 +1337,9 @@ export default function App() {
                     <AlertCircle className="w-3 h-3" /> 匯入說明：
                   </p>
                   <p>1. 支援直接讀取 PDF 檔案或貼上文字。</p>
-                  <p>2. 格式：<code className="bg-amber-100 px-1 rounded">日期 單價 重量 [項目]</code></p>
-                  <p>3. 範例：<code className="bg-amber-100 px-1 rounded">9月1日 1.945 248 紙</code></p>
+                  <p>2. 格式：<code className="bg-amber-100 px-1 rounded">日期 [項目] 單價 重量</code> (總價由系統自動計算)</p>
+                  <p>3. 每日範例：<code className="bg-amber-100 px-1 rounded">9月1日 紙 1.945 248</code></p>
+                  <p>4. 月度範例：<code className="bg-amber-100 px-1 rounded">2024/12 報紙 2.5 1500</code></p>
                   <p>項目可填：紙, 瓶罐, 鐵罐, 鋁罐, 塑膠, 電器, 鐵, 鋁, 報紙, 洗腎桶, 廢油</p>
                 </div>
 
