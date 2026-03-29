@@ -1,20 +1,129 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# 資源回收統計系統 (Recycle-Count)
 
-# Run and deploy your AI Studio app
+這是一個基於 React (Vite) 的高質感資源回收統計系統，能將您「每日」或「每月」的回收金額，紀錄到 Google Sheets (搭配 Google Apps Script)，並且設計能自動部署至 GitHub Pages。本專案採用舒適的大地森林色系設計，提供優秀的使用者體驗。
 
-This contains everything you need to run your app locally.
+---
 
-View your app in AI Studio: https://ai.studio/apps/f042f05f-4301-4741-b19b-8ca8a5b89c90
+## ✨ 網站功能需求說明 (Features)
 
-## Run Locally
+若您需要在其他平台複製或重新開發此專案，請參考以下核心功能需求清單：
 
-**Prerequisites:**  Node.js
+### 1. 紀錄輸入 (Input Form)
+* **雙模式輸入**：支援「每日明細」與「每月總結」兩種紀錄方式。
+* **智慧防呆機制**：若該月已經存在「每月總結」的紀錄，系統會智慧阻擋該月份的「每日明細」輸入，避免資料重複計算。
+* **分類項目與單位**：
+  * 紙 (Paper)：重量 (kg)
+  * 鋁鐵罐 (Cans)：重量 (kg)
+  * 塑膠 (Plastic)：重量 (kg)
+  * 洗腎桶 (Dialysis)：回收次數 (次) 
+  * 廢油 (Oil)：重量 (kg)
+* **自動帶入單價**：系統會依照資料庫中最靠近當下的紀錄，自動帶入各項目的最近一次單價，減少重複輸入。
+* **小計即時試算**：輸入時即時顯示單項小計與總額。
+* **批次匯入 (CSV Import)**：支援貼上 CSV 文字檔 (格式：`日期, 名稱, 單價, 數量/重量`)，快速批次匯入多筆歷史資料。
 
+### 2. 月回收紀錄報表 (Monthly Report)
+* **月份切換**：可自由選擇檢視的月份。
+* **明細表格**：以表格方式列出該月「每一天」各類別的數量/次數、小計金額。
+* **日總計**：自動加總每天的總共回收金額。
+* **合併計算邏輯**：如果當月有「單一分類」的月紀錄，報表會優先顯示月紀錄，而忽略該分類下的每日明細，確保數據不衝突。
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+### 3. 年回收紀錄報表 (Yearly Report - Charts)
+* 提供圖表視覺化，並分為兩種強大的檢視模式：
+* **模式 A：綜合總覽 (Overview)**
+  * 以長條圖 (Bar Chart) 呈現選定「單一年度」的 1 到 12 月總回收金額。
+  * 各月份長條圖可呈現不同分類項目的比例與數值堆疊。
+* **模式 B：項目比較 (By Category)**
+  * 提供每一種分類獨立的折線圖 (Line Chart) 卡片。
+  * **跨年度比較**：X 軸為 1 到 12 月，圖表內自動畫出「歷年資料」的折線 (例如同時有 2023、2024、2025 年的線)，方便比對歷史同期數據。
+  * **雙 Y 軸設計**：左側 Y 軸顯示金額 ($)，右側 Y 軸顯示數量/重量 (kg/次)，並用虛實線區分。
+  * **底部年度小計**：圖卡底部會自動結算並顯示該類別歷年來的年度總金額與總數。
+
+### 4. 紀錄管理與刪除 (History Management)
+* **資料列表**：以表格方式列出所有寫入的單筆明細 (包含流水號、時間、日期、單價、分類等)。
+* **分頁功能**：支援大量資料分頁顯示，避免畫面卡頓。
+* **搜尋過濾**：提供關鍵字搜尋，可用日期 (如 2026-03)、分類名稱快速篩選目標紀錄。
+* **批次與單筆刪除**：支援單筆刪除以及 Checkbox 勾選批次刪除，操作後連動更新 Google Sheets。
+
+### 5. 後端整合與狀態 (Backend & Status)
+* **連線狀態檢測**：Header 顯示系統連線與資料同步狀態 (Loading Indicator)。
+* **API 架構**：前端透過 Fetch 呼叫 Google Apps Script (GAS) 部署的 Web App URL 來進行 CRUD (避免 GAS CORS 問題，採用 POST `mode: no-cors` 解決方案，確保資料能順利寫入而無瀏覽器報錯)。
+
+---
+
+## 🚀 1. Google Sheets 原料建立
+
+請建立一個全新的 Google 試算表，並且依序建立以下兩個工作表 (Sheet)：
+
+### 1-1. 工作表一：命名為「`每日回收紀錄`」
+請在第一列 (A1~G1) 依序填入以下欄位名稱：
+1. `NO` (前端傳送或 GAS 自動生成的流水號)
+2. `日期`
+3. `名稱` (例如: 紙、塑膠、鋁鐵罐、洗腎桶、廢油)
+4. `單價`
+5. `重量(Kg)/數量(個)`
+6. `金額` (CSV若無則由前端系統計算)
+7. `時間` (GAS自動補上寫入時的 Timestamp)
+
+### 1-2. 工作表二：命名為「`每月回收紀錄`」
+請在第一列 (A1~H1) 依序填入以下欄位名稱：
+1. `NO`
+2. `日期(年+月)`
+3. `名稱`
+4. `單價`
+5. `重量(Kg)/數量(個)`
+6. `總金額`
+7. `是否有日記錄`
+8. `時間`
+
+---
+
+## 🛠 2. Google Apps Script (GAS) 後端設定
+
+1. 在剛建立的 Google 試算表中，點選上方選單的 **「擴充功能」 > 「Apps Script」**。
+2. 將專案中的 `backend.gs` 內容複製並貼上至 GAS 編輯器中。
+3. 點擊右上角的 **「部署」 > 「新增部署作業」**。
+4. 選擇類型為 **「網頁應用程式 (Web App)」**：
+   - 執行身分：`我` (您的 Google 帳戶)
+   - 誰可以存取：`所有人` (**非常重要！這是讓前端呼叫免被 CORS 阻擋的關鍵**)
+5. 點擊「部署」，並授權相關權限。
+6. 完成部署後，畫面會給您一串 **「網頁應用程式網址 (Web App URL)」**，請將這段網址複製下來。
+
+---
+
+## 💻 3. 本地開發與環境變數 (.env)
+
+如果您想在電腦本地端運行此系統：
+
+1. 複製 `.env.example` 並重新命名為 `.env` (注意前方有個小數點)：
+   ```bash
+   cp .env.example .env
+   ```
+2. 將您剛剛在 GAS 取得的網址貼入 `.env` 中：
+   ```env
+   VITE_GOOGLE_APP_SCRIPT_URL="https://script.google.com/macros/s/您的部署ID/exec"
+   ```
+3. 在終端機執行：
+   ```bash
+   npm install
+   npm run dev
+   ```
+   即可開啟本地測試伺服器。
+
+---
+
+## 🌍 4. 自動部署到 GitHub Pages
+
+此專案已預先設定好 GitHub Actions，當您推送程式碼到 `main` 分支時，將會自動建置並部署至 GitHub Pages。
+
+**設定步驟：**
+
+1. 進入您在 GitHub 上的專案庫頁面。
+2. 點擊 **Settings** (設定) > 側邊欄找到 **Secrets and variables** > 點擊 **Actions**。
+3. 點擊右上角的 **New repository secret**。
+4. **Name** 請填入：`VITE_GOOGLE_APP_SCRIPT_URL`
+5. **Secret** 請貼上您的 **GAS Web App URL**（要包含 `https://`）。
+6. 新增完成後，前往 **Settings** > 側邊欄 **Pages**：
+   - 將 **Build and deployment** 下的 **Source** 改為 **GitHub Actions**。
+7. 從現在起，只要您推上程式碼到 `main` 或是觸發 Action，幾分鐘後系統就會自動更新到您的 GitHub Pages 網址上囉！
+
+> 提醒：若您的專案不是部署在 User Page (username.github.io)，而是在 Project Page (username.github.io/repo-name)，請記得在 `vite.config.ts` 中加入 `base: '/repo-name/'`，以避免載入不到靜態資源。

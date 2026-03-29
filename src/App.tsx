@@ -1,1412 +1,942 @@
-/**
- * @license
- * SPDX-License-Identifier: Apache-2.0
- */
-
 import React, { useState, useEffect, useMemo } from 'react';
+import { submitRecords, fetchRecords, deleteRecords, RecyclingRecord } from './services/gasService';
 import { 
-  auth, 
-  db, 
-  googleProvider, 
-  signInWithPopup, 
-  signOut, 
-  onAuthStateChanged, 
-  collection, 
-  addDoc, 
-  query, 
-  where, 
-  onSnapshot, 
-  orderBy, 
-  serverTimestamp,
-  deleteDoc,
-  doc,
-  setDoc,
-  writeBatch,
-  User 
-} from './firebase';
-import { 
-  format, 
-  startOfMonth, 
-  endOfMonth, 
-  eachDayOfInterval, 
-  isSameDay, 
-  parseISO,
-  startOfYear,
-  endOfYear,
-  eachMonthOfInterval,
-  setYear,
-  setMonth,
-  setDate
+  format, startOfMonth, parseISO, eachMonthOfInterval, startOfYear, endOfYear
 } from 'date-fns';
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  Legend, 
-  ResponsiveContainer,
-  BarChart,
-  Bar
+import {
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, LineChart, Line
 } from 'recharts';
-import { 
-  Plus, 
-  Trash2, 
-  TrendingUp, 
-  Calendar as CalendarIcon, 
-  PieChart as PieChartIcon,
-  LogOut,
-  LogIn,
-  ChevronLeft,
-  ChevronRight,
-  Recycle,
-  Upload,
-  FileText,
-  AlertCircle,
-  CheckCircle2,
-  X
-} from 'lucide-react';
-import { motion, AnimatePresence } from 'motion/react';
-import { clsx, type ClassValue } from 'clsx';
-import { twMerge } from 'tailwind-merge';
-import * as pdfjs from 'pdfjs-dist';
-
-// Set worker source for PDF.js
-pdfjs.GlobalWorkerOptions.workerSrc = new URL(
-  'pdfjs-dist/build/pdf.worker.mjs',
-  import.meta.url
-).href;
-
-enum OperationType {
-  CREATE = 'create',
-  UPDATE = 'update',
-  DELETE = 'delete',
-  LIST = 'list',
-  GET = 'get',
-  WRITE = 'write',
-}
-
-interface FirestoreErrorInfo {
-  error: string;
-  operationType: OperationType;
-  path: string | null;
-  authInfo: {
-    userId: string | undefined;
-    email: string | null | undefined;
-    emailVerified: boolean | undefined;
-    isAnonymous: boolean | undefined;
-    tenantId: string | null | undefined;
-    providerInfo: {
-      providerId: string;
-      displayName: string | null;
-      email: string | null;
-      photoUrl: string | null;
-    }[];
-  }
-}
-
-function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
-  const errInfo: FirestoreErrorInfo = {
-    error: error instanceof Error ? error.message : String(error),
-    authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
-      providerInfo: auth.currentUser?.providerData.map(provider => ({
-        providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
-      })) || []
-    },
-    operationType,
-    path
-  }
-  console.error('Firestore Error: ', JSON.stringify(errInfo));
-  throw new Error(JSON.stringify(errInfo));
-}
-
-function cn(...inputs: ClassValue[]) {
-  return twMerge(clsx(inputs));
-}
-
-interface RecyclingEntry {
-  id: string;
-  date: string;
-  type?: 'daily' | 'monthly';
-  paper_weight: number;
-  paper_price: number;
-  paper_amount: number;
-  bottles_weight: number;
-  bottles_price: number;
-  bottles_amount: number;
-  iron_cans_weight: number;
-  iron_cans_price: number;
-  iron_cans_amount: number;
-  aluminum_cans_weight: number;
-  aluminum_cans_price: number;
-  aluminum_cans_amount: number;
-  plastic_weight: number;
-  plastic_price: number;
-  plastic_amount: number;
-  appliances_weight: number;
-  appliances_price: number;
-  appliances_amount: number;
-  iron_weight: number;
-  iron_price: number;
-  iron_amount: number;
-  aluminum_weight: number;
-  aluminum_price: number;
-  aluminum_amount: number;
-  newspaper_weight: number;
-  newspaper_price: number;
-  newspaper_amount: number;
-  dialysis_buckets_count: number;
-  dialysis_buckets_price: number;
-  dialysis_buckets_amount: number;
-  waste_oil_weight: number;
-  waste_oil_price: number;
-  waste_oil_amount: number;
-  uid: string;
-  createdAt: any;
-}
+import { Recycle, Plus, Upload, AlertCircle, FileText, BarChart3, CalendarDays, Clock, Trash2, Search, ChevronLeft, ChevronRight } from 'lucide-react';
+import './index.css';
 
 const CATEGORIES = [
-  { id: 'paper', label: '紙', color: 'emerald' },
-  { id: 'bottles', label: '瓶罐', color: 'blue' },
-  { id: 'iron_cans', label: '鐵罐', color: 'amber' },
-  { id: 'aluminum_cans', label: '鋁罐', color: 'orange' },
-  { id: 'plastic', label: '塑膠', color: 'cyan' },
-  { id: 'appliances', label: '電器', color: 'purple' },
-  { id: 'iron', label: '鐵', color: 'gray' },
-  { id: 'aluminum', label: '鋁', color: 'slate' },
-  { id: 'newspaper', label: '報紙', color: 'indigo' },
-  { id: 'dialysis_buckets', label: '洗腎桶', color: 'rose', isCount: true },
-  { id: 'waste_oil', label: '廢油', color: 'yellow' }
+  { id: 'paper', label: '紙', color: 'paper', isCount: false },
+  { id: 'cans', label: '鋁鐵罐', color: 'cans', isCount: false },
+  { id: 'plastic', label: '塑膠', color: 'plastic', isCount: false },
+  { id: 'dialysis', label: '洗腎桶', color: 'dialysis', isCount: true },
+  { id: 'oil', label: '廢油', color: 'oil', isCount: false }
 ];
 
+// 初始化表單狀態
+const initialFormState = CATEGORIES.reduce((acc, cat) => ({
+  ...acc,
+  [`${cat.id}_qty`]: '',
+  [`${cat.id}_price`]: ''
+}), {} as Record<string, string>);
+
 export default function App() {
-  const [user, setUser] = useState<User | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [entries, setEntries] = useState<RecyclingEntry[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [fetching, setFetching] = useState(true);
+  const [entries, setEntries] = useState<RecyclingRecord[]>([]);
+  
+  // Tabs
+  const [view, setView] = useState<'input' | 'monthly_report' | 'yearly_report' | 'history'>('input');
+  const [yearlySubView, setYearlySubView] = useState<'overview' | 'by_category'>('overview');
+  const [inputType, setInputType] = useState<'daily' | 'monthly'>('daily');
+  
+  // Forms
   const [selectedDate, setSelectedDate] = useState(format(new Date(), 'yyyy-MM-dd'));
-  const [formData, setFormData] = useState<any>(
-    CATEGORIES.reduce((acc, cat) => ({
-      ...acc,
-      [`${cat.id}_${cat.isCount ? 'count' : 'weight'}`]: '',
-      [`${cat.id}_price`]: ''
-    }), {})
-  );
-  const [view, setView] = useState<'daily' | 'monthly' | 'yearly' | 'comparison'>('daily');
-  const [comparisonCategory, setComparisonCategory] = useState<string>('all');
-  const [selectedComparisonYears, setSelectedComparisonYears] = useState<number[]>([]);
-
-  const availableYears = useMemo(() => {
-    const years = new Set<number>();
-    entries.forEach(e => {
-      const y = parseISO(e.date).getFullYear();
-      if (!isNaN(y)) years.add(y);
-    });
-    return Array.from(years).sort((a, b) => b - a);
-  }, [entries]);
-
-  // Initialize selected years when availableYears changes
-  useEffect(() => {
-    if (availableYears.length > 0 && selectedComparisonYears.length === 0) {
-      setSelectedComparisonYears(availableYears.slice(0, 3).sort());
-    }
-  }, [availableYears, selectedComparisonYears.length]);
-  const [entryType, setEntryType] = useState<'daily' | 'monthly'>('daily');
-  const [currentMonth, setCurrentMonth] = useState(new Date());
-  const [showReceipt, setShowReceipt] = useState<RecyclingEntry | null>(null);
-  const [hasPrefilled, setHasPrefilled] = useState(false);
-  const [showImportModal, setShowImportModal] = useState(false);
+  const [formData, setFormData] = useState(initialFormState);
+  
+  // CSV Import
+  const [showImport, setShowImport] = useState(false);
   const [importText, setImportText] = useState('');
-  const [importStatus, setImportStatus] = useState<{ success?: string; error?: string }>({});
-  const [isImporting, setIsImporting] = useState(false);
-  const [isReadingPDF, setIsReadingPDF] = useState(false);
-
-  // Helper to calculate amount
-  const calculateAmount = (qty: string, price: string) => {
-    const q = parseFloat(qty) || 0;
-    const p = parseFloat(price) || 0;
-    return (q * p).toFixed(2);
-  };
+  
+  const [toast, setToast] = useState<{msg: string, isError: boolean} | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  
+  // History View States
+  const [historySearch, setHistorySearch] = useState('');
+  const [historyPage, setHistoryPage] = useState(1);
+  const ITEMS_PER_PAGE = 20;
+  const [rawDebug, setRawDebug] = useState<any[]>([]);
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (user) => {
-      setUser(user);
-      setLoading(false);
-    });
-    return () => unsubscribe();
+    loadData();
   }, []);
 
-  useEffect(() => {
-    if (!user) {
-      setEntries([]);
+  const showToast = (msg: string, isError = false) => {
+    setToast({ msg, isError });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const loadData = async () => {
+    setFetching(true);
+    try {
+      const data = await fetchRecords('all');
+      console.log('[DEBUG] raw daily sample:', data.daily?.slice(0,2));
+      console.log('[DEBUG] raw monthly sample:', data.monthly?.slice(0,2));
+      setRawDebug(data.monthly?.slice(0, 3) || []);
+      const all: RecyclingRecord[] = [];
+      
+      const normalizeDate = (val: any, isMonthly: boolean) => {
+        let str = String(val || '').trim();
+        if (!str) return '';
+        if (str.includes('T')) {
+          try {
+            return format(new Date(str), isMonthly ? 'yyyy-MM' : 'yyyy-MM-dd');
+          } catch (e) { return str; }
+        }
+        // 將可能的斜線轉換為減號並補零
+        str = str.replace(/\//g, '-');
+        const parts = str.split('-');
+        if (parts.length >= 2) {
+          const y = parts[0];
+          const m = parts[1].padStart(2, '0');
+          if (isMonthly) return `${y}-${m}`;
+          const d = parts[2] ? parts[2].padStart(2, '0') : '01';
+          return `${y}-${m}-${d}`;
+        }
+        return str;
+      };
+      
+      // 合併與轉換資料格式
+      if (data.daily) {
+        data.daily.forEach((d: any) => {
+          all.push({
+            no: Number(d['NO']),
+            type: 'daily',
+            date: normalizeDate(d['日期'], false),
+            name: d['名稱'],
+            price: Number(d['單價']),
+            quantity: Number(d['重量(Kg)/數量(個)']),
+            createdAt: (d['時間'] || d['TIME']) ? format(new Date(d['時間'] || d['TIME']), 'yyyy-MM-dd HH:mm') : ''
+          });
+        });
+      }
+      if (data.monthly) {
+        data.monthly.forEach((m: any) => {
+          // ⚠️ 欄位錯位修正：CSV 匯入時 日期(年+月)=名稱, 名稱=日期ISO字串
+          const rawDate = String(m['名稱'] || '');
+          // Google Sheets 回傳 UTC ISO 字串，如 2022-12-31T16:00:00Z 代表台灣 2023-01-01
+          // 必須轉成本地時間（UTC+8）再取年月，否則跨日邊界的月份會偏移一個月
+          const dateStr = rawDate.includes('T')
+            ? (() => {
+                const d = new Date(rawDate);
+                // 以 UTC+8 計算本地年月
+                const localMs = d.getTime() + 8 * 60 * 60 * 1000;
+                const local = new Date(localMs);
+                const y = local.getUTCFullYear();
+                const mo = String(local.getUTCMonth() + 1).padStart(2, '0');
+                return `${y}-${mo}`;
+              })()
+            : normalizeDate(rawDate, true);
+          const nameStr = String(m['日期(年+月)'] || m['名稱'] || '');
+          
+          all.push({
+            no: Number(m['NO']),
+            type: 'monthly',
+            date: dateStr,
+            name: nameStr,
+            price: Number(m['單價']),
+            quantity: Number(m['重量(Kg)/數量(個)']),
+            hasDailyRecord: m['是否有日記錄'] === '是',
+            createdAt: m['紀錄時間'] ? format(new Date(m['紀錄時間']), 'yyyy-MM-dd HH:mm') : ''
+          });
+        });
+      }
+      
+      // 以 NO 作為主要排序 (最新新增在最前面)
+      all.sort((a, b) => (b.no || 0) - (a.no || 0));
+      setEntries(all);
+
+      // 自動預設最近一次的各項單價
+      setFormData(prev => {
+        const next = { ...prev };
+        let hasChanges = false;
+        CATEGORIES.forEach(cat => {
+          if (!next[`${cat.id}_price`]) {
+            // 從由新到舊排序的陣列中找出該類別第一筆有效單價
+            const latest = all.find(e => e.name === cat.label && e.price > 0);
+            if (latest) {
+              next[`${cat.id}_price`] = String(latest.price);
+              hasChanges = true;
+            }
+          }
+        });
+        return hasChanges ? next : prev;
+      });
+    } catch (err) {
+      console.error(err);
+      showToast('讀取資料失敗，請檢查 GAS 網址與權限設定', true);
+    } finally {
+      setFetching(false);
+    }
+  };
+
+  /**
+   * 表單送出
+   */
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+
+    const recordsToSubmit: RecyclingRecord[] = [];
+    const dateStr = inputType === 'daily' ? selectedDate : format(parseISO(selectedDate), 'yyyy-MM');
+
+    CATEGORIES.forEach(cat => {
+      const price = Number(formData[`${cat.id}_price`]);
+      const qty = Number(formData[`${cat.id}_qty`]);
+      if (qty > 0 || price > 0) {
+        recordsToSubmit.push({
+          type: inputType,
+          date: dateStr,
+          name: cat.label,
+          price: price,
+          quantity: qty,
+          hasDailyRecord: inputType === 'monthly' ? false : undefined
+        });
+      }
+    });
+
+    if (recordsToSubmit.length === 0) {
+      showToast('請至少填寫一個項目的數量或單價', true);
+      setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(db, 'recycling_entries'),
-      where('uid', '==', user.uid),
-      orderBy('date', 'desc')
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const newEntries = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      })) as RecyclingEntry[];
-      setEntries(newEntries);
-    }, (error) => {
-      console.error("Firestore Error: ", error);
-    });
-
-    return () => unsubscribe();
-  }, [user]);
-
-  useEffect(() => {
-    if (entries.length > 0 && !hasPrefilled) {
+    try {
+      await submitRecords(recordsToSubmit);
+      showToast('資料新增成功！');
+      
       setFormData(prev => {
         const next = { ...prev };
         CATEGORIES.forEach(cat => {
-          const priceKey = `${cat.id}_price`;
-          if (entries[0][priceKey as keyof RecyclingEntry]) {
-            next[priceKey] = entries[0][priceKey as keyof RecyclingEntry].toString();
-          }
+          next[`${cat.id}_qty`] = '';
         });
         return next;
       });
-      setHasPrefilled(true);
+      loadData(); 
+    } catch (err) {
+      showToast('資料新增失敗，請稍後再試。', true);
+    } finally {
+      setLoading(false);
     }
-  }, [entries, hasPrefilled]);
+  };
 
-  const handleBatchImport = async () => {
-    if (!user || !importText.trim()) return;
-    setIsImporting(true);
-    setImportStatus({});
+  /**
+   * 批次/單筆刪除紀錄
+   */
+  const handleBatchDelete = async (targets: RecyclingRecord[]) => {
+    const validTargets = targets.filter(t => t.no);
+    if (validTargets.length === 0) return;
+
+    const confirmDelete = window.confirm(`確定要從 Google Sheets 中真實刪除這 ${validTargets.length} 筆紀錄嗎？\n\n注意：此操作無法復原。`);
+    if (!confirmDelete) return;
+
+    setLoading(true);
+    try {
+      const payload = validTargets.map(t => ({ type: t.type, no: t.no! }));
+      await deleteRecords(payload);
+      showToast(`成功刪除 ${validTargets.length} 筆資料`);
+      setSelectedIds(new Set());
+      // 等待1秒讓GAS反應後重新讀取
+      setTimeout(() => loadData(), 1000);
+    } catch (err) {
+      showToast('刪除失敗，請檢查權限及連線', true);
+      setLoading(false);
+    }
+  };
+
+  const toggleSelection = (id: string) => {
+    const next = new Set(selectedIds);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    setSelectedIds(next);
+  };
+
+  /**
+   * CSV 匯入邏輯
+   */
+  const handleImport = async () => {
+    if (!importText.trim()) return;
+    setLoading(true);
 
     try {
-      const lines = importText.split('\n').filter(l => l.trim());
-      const batch = writeBatch(db);
-      let count = 0;
+      const lines = importText.split('\n').filter(l => l.trim().length > 0);
+      const recordsToSubmit: RecyclingRecord[] = [];
 
-      for (const line of lines) {
-        // Expected format: Date [Category] Price Weight [Total]
-        // Example: 2026/1/2 紙 1.7 318 541
-        // Example: 2026/1/21 紙 1.7 1205 2,049
-        const parts = line.trim().split(/[\s,]+/).filter(p => p.trim());
-        if (parts.length < 3) continue;
-
-        let dateStr = '';
-        let price = NaN;
-        let weight = NaN;
-        let category = CATEGORIES[0]; // Default to first
-
-        // 1. Find the date
-        let date = new Date(currentMonth);
-        let dateFound = false;
-        let isMonthly = false;
-
-        // Try YYYY/M/D or M/D or YYYY/M or M月
-        const fullDateMatch = line.match(/(\d{4})[/-](\d+)[/-](\d+)/);
-        const monthOnlyMatch = line.match(/(\d{4})[/-](\d+)(?!\d)/); // YYYY/MM but not YYYY/MM/DD
-        const shortDateMatch = line.match(/(\d+)[月/](\d+)[日]?/);
-        const shortMonthMatch = line.match(/(\d+)月(?![日\d])/);
-
-        if (fullDateMatch) {
-          const y = parseInt(fullDateMatch[1]);
-          const m = parseInt(fullDateMatch[2]) - 1;
-          const d = parseInt(fullDateMatch[3]);
-          date = new Date(y, m, d);
-          dateFound = true;
-          dateStr = fullDateMatch[0];
-        } else if (monthOnlyMatch) {
-          const y = parseInt(monthOnlyMatch[1]);
-          const m = parseInt(monthOnlyMatch[2]) - 1;
-          date = new Date(y, m, 1);
-          dateFound = true;
-          isMonthly = true;
-          dateStr = monthOnlyMatch[0];
-        } else if (shortDateMatch) {
-          const m = parseInt(shortDateMatch[1]) - 1;
-          const d = parseInt(shortDateMatch[2]);
-          date = setMonth(date, m);
-          date = setDate(date, d);
-          dateFound = true;
-          dateStr = shortDateMatch[0];
-        } else if (shortMonthMatch) {
-          const m = parseInt(shortMonthMatch[1]) - 1;
-          date = setMonth(date, m);
-          date = setDate(date, 1);
-          dateFound = true;
-          isMonthly = true;
-          dateStr = shortMonthMatch[0];
-        }
-
-        if (!dateFound) continue;
-
-        // 2. Find the category (longest match first to avoid '鐵' matching '鐵罐')
-        const sortedCategories = [...CATEGORIES].sort((a, b) => b.label.length - a.label.length);
-        const foundCat = sortedCategories.find(c => line.includes(c.label));
-        if (foundCat) category = foundCat;
-
-        // 3. Find price and weight (Total is calculated by system)
-        // Remove commas from the line to handle numbers like 2,049 correctly
-        let cleanLine = line.replace(dateStr, '').replace(category.label, '').replace(/,/g, '');
-        const numbers = cleanLine.match(/\d+\.?\d*/g);
-
-        if (numbers && numbers.length >= 2) {
-          // Order: Price, Weight
-          price = parseFloat(numbers[0]);
-          weight = parseFloat(numbers[1]);
-        } else {
-          // Fallback to parts if regex fails
-          const numericParts = parts.filter(p => !isNaN(parseFloat(p.replace(/,/g, ''))) && !p.includes('/') && !p.includes('月'));
-          if (numericParts.length >= 2) {
-            price = parseFloat(numericParts[0].replace(/,/g, ''));
-            weight = parseFloat(numericParts[1].replace(/,/g, ''));
+      lines.forEach(line => {
+        const parts = line.split(/[,\t]/).map(p => p.trim());
+        if (parts.length >= 4) {
+          const date = parts[0];
+          const name = parts[1];
+          const price = Number(parts[2] || 0);
+          const quantity = Number(parts[3] || 0);
+          
+          if (!isNaN(price) && !isNaN(quantity)) {
+            const isMonthly = date.length <= 7;
+            recordsToSubmit.push({
+              type: isMonthly ? 'monthly' : 'daily',
+              date: isMonthly ? date.substring(0,7) : date,
+              name,
+              price,
+              quantity,
+              hasDailyRecord: isMonthly ? false : undefined
+            });
           }
         }
+      });
 
-        if (isNaN(price) || isNaN(weight)) continue;
-
-        const formattedDate = format(date, 'yyyy-MM-dd');
-        
-        const entry: any = {
-          uid: user.uid,
-          date: formattedDate,
-          type: isMonthly ? 'monthly' : 'daily',
-          createdAt: serverTimestamp()
-        };
-
-        // Initialize all categories to 0
-        CATEGORIES.forEach(cat => {
-          const qtyKey = `${cat.id}_${cat.isCount ? 'count' : 'weight'}`;
-          const priceKey = `${cat.id}_price`;
-          const amountKey = `${cat.id}_amount`;
-          entry[qtyKey] = 0;
-          entry[priceKey] = 0;
-          entry[amountKey] = 0;
-        });
-
-        // Set the parsed category
-        const qtyKey = `${category.id}_${category.isCount ? 'count' : 'weight'}`;
-        const priceKey = `${category.id}_price`;
-        const amountKey = `${category.id}_amount`;
-
-        entry[qtyKey] = weight;
-        entry[priceKey] = price;
-        // System automatically calculates total
-        entry[amountKey] = Number((weight * price).toFixed(2));
-
-        const docRef = doc(collection(db, 'recycling_entries'));
-        batch.set(docRef, entry);
-        count++;
-      }
-
-      if (count > 0) {
-        try {
-          await batch.commit();
-        } catch (error) {
-          handleFirestoreError(error, OperationType.WRITE, 'recycling_entries');
-        }
-        setImportStatus({ success: `成功匯入 ${count} 筆資料！` });
+      if (recordsToSubmit.length > 0) {
+        await submitRecords(recordsToSubmit);
+        showToast(`成功批次匯入 ${recordsToSubmit.length} 筆資料！`);
         setImportText('');
-        setTimeout(() => setShowImportModal(false), 2000);
+        setShowImport(false);
+        setTimeout(() => loadData(), 1000); // 延遲讓後端寫入完畢
       } else {
-        setImportStatus({ error: '找不到有效的資料行，請檢查格式。' });
+        showToast('找不到符合格式的資料行 (日期,名稱,單價,數量)', true);
       }
-    } catch (error) {
-      console.error("Batch import error", error);
-      setImportStatus({ error: '匯入失敗，請稍後再試。' });
+    } catch (err) {
+      showToast('批次匯入失敗。', true);
     } finally {
-      setIsImporting(false);
+      setLoading(false);
     }
   };
 
-  const handlePDFUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  /**
+   * 智慧月度總結阻擋
+   */
+  const monthString = format(parseISO(selectedDate), 'yyyy-MM');
+  const hasMonthlyRecord = entries.some(e => e.type === 'monthly' && e.date === monthString);
+  const showDailyFormBlocked = inputType === 'daily' && hasMonthlyRecord;
 
-    setIsReadingPDF(true);
-    setImportStatus({});
-    try {
-      const arrayBuffer = await file.arrayBuffer();
-      const pdf = await pdfjs.getDocument(arrayBuffer).promise;
-      let fullText = '';
-      
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i);
-        const textContent = await page.getTextContent();
-        const strings = textContent.items.map((item: any) => item.str);
-        
-        // Group strings by their vertical position (y-coordinate) to reconstruct lines
-        // This is a bit more robust than just joining all strings
-        const items = textContent.items as any[];
-        const lines: { [key: number]: string[] } = {};
-        
-        items.forEach(item => {
-          const y = Math.round(item.transform[5]);
-          if (!lines[y]) lines[y] = [];
-          lines[y].push(item.str);
-        });
+  // ==== 報表與歷史紀錄計算區 ====
 
-        // Sort lines by y descending (top to bottom)
-        const sortedY = Object.keys(lines).map(Number).sort((a, b) => b - a);
-        const pageText = sortedY.map(y => lines[y].join(' ')).join('\n');
-        
-        fullText += pageText + '\n';
-      }
-
-      setImportText(prev => prev + (prev ? '\n' : '') + fullText);
-      setImportStatus({ success: 'PDF 內容已讀取，請檢查後匯入。' });
-    } catch (error) {
-      console.error("PDF reading error", error);
-      setImportStatus({ error: '無法讀取 PDF 檔案。' });
-    } finally {
-      setIsReadingPDF(false);
-      // Reset file input
-      e.target.value = '';
+  const filteredHistory = useMemo(() => {
+    let result = entries;
+    if (historySearch.trim()) {
+      const lower = historySearch.toLowerCase();
+      result = entries.filter(e => 
+        e.name.toLowerCase().includes(lower) ||
+        e.date.includes(lower) ||
+        (e.createdAt && e.createdAt.includes(lower))
+      );
     }
-  };
+    return result;
+  }, [entries, historySearch]);
 
-  const handleLogin = async () => {
-    try {
-      const result = await signInWithPopup(auth, googleProvider);
-      const user = result.user;
-      
-      // Create/update user document
-      const userDocRef = doc(db, 'users', user.uid);
-      try {
-        await setDoc(userDocRef, {
-          uid: user.uid,
-          email: user.email,
-          role: 'client', // Default role
-          lastLogin: serverTimestamp()
-        }, { merge: true });
-      } catch (err) {
-        console.error("Error creating user document", err);
-      }
-    } catch (error) {
-      console.error("Login failed", error);
-    }
-  };
+  const totalHistoryPages = Math.max(1, Math.ceil(filteredHistory.length / ITEMS_PER_PAGE));
+  const currentHistoryPageData = filteredHistory.slice((historyPage - 1) * ITEMS_PER_PAGE, historyPage * ITEMS_PER_PAGE);
 
-  const handleLogout = () => signOut(auth);
+  // 1. 月回收紀錄報表
+  const currentMonthEntries = useMemo(() => {
+    const monthlyInMonth = entries.filter(e => e.type === 'monthly' && e.date === monthString);
+    const dailyInMonth = entries.filter(e => e.type === 'daily' && e.date.startsWith(monthString));
+    
+    // 找出已經統整為「月紀錄」的項目類別 (如：紙、塑膠)
+    const categoriesWithMonthly = new Set(monthlyInMonth.map(e => e.name));
+    
+    // 針對「尚未」有月紀錄的分類，才放行它的「每日明細」
+    const validDaily = dailyInMonth.filter(e => !categoriesWithMonthly.has(e.name));
+    
+    return [...monthlyInMonth, ...validDaily];
+  }, [entries, monthString]);
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!user) return;
-
-    const entry: any = {
-      uid: user.uid,
-      date: entryType === 'monthly' ? format(startOfMonth(parseISO(selectedDate)), 'yyyy-MM-dd') : selectedDate,
-      type: entryType,
-      createdAt: serverTimestamp()
-    };
-
-    CATEGORIES.forEach(cat => {
-      const qtyKey = `${cat.id}_${cat.isCount ? 'count' : 'weight'}`;
-      const priceKey = `${cat.id}_price`;
-      const amountKey = `${cat.id}_amount`;
-      
-      entry[qtyKey] = Number(formData[qtyKey]) || 0;
-      entry[priceKey] = Number(formData[priceKey]) || 0;
-      entry[amountKey] = Number(calculateAmount(formData[qtyKey], formData[priceKey]));
+  const monthReportData = useMemo(() => {
+    const map = new Map();
+    currentMonthEntries.forEach(e => {
+      if (!map.has(e.date)) map.set(e.date, { date: e.date, total: 0 });
+      const row = map.get(e.date);
+      const amount = e.price * e.quantity;
+      row[e.name] = (row[e.name] || 0) + e.quantity;
+      row[`${e.name}金額`] = (row[`${e.name}金額`] || 0) + amount;
+      row.total += amount;
     });
+    return Array.from(map.values()).sort((a,b) => a.date.localeCompare(b.date));
+  }, [currentMonthEntries]);
 
-    try {
-      await addDoc(collection(db, 'recycling_entries'), entry);
-      // Keep the prices for the next entry, only clear weights/counts
-      setFormData(prev => {
-        const next = { ...prev };
-        CATEGORIES.forEach(cat => {
-          next[`${cat.id}_${cat.isCount ? 'count' : 'weight'}`] = '';
-        });
-        return next;
-      });
-    } catch (error) {
-      console.error("Error adding entry", error);
-    }
-  };
-
-  const handleDelete = async (id: string) => {
-    try {
-      await deleteDoc(doc(db, 'recycling_entries', id));
-    } catch (error) {
-      console.error("Error deleting entry", error);
-    }
-  };
-
-  const monthlyData = useMemo(() => {
-    const start = startOfMonth(currentMonth);
-    const end = endOfMonth(currentMonth);
-    const days = eachDayOfInterval({ start, end });
-    const monthStr = format(currentMonth, 'yyyy-MM');
-
-    const daily = days.map(day => {
-      const dateStr = format(day, 'yyyy-MM-dd');
-      const dayEntries = entries.filter(e => e.date === dateStr && e.type !== 'monthly');
-      const data: any = {
-        date: format(day, 'MM/dd'),
-        totalAmount: 0
-      };
+  // 2. 年回收紀錄報表
+  const currentYearStr = format(parseISO(selectedDate), 'yyyy');
+  const yearlyTrendData = useMemo(() => {
+    const months = Array.from({length: 12}, (_, i) => `${currentYearStr}-${String(i+1).padStart(2,'0')}`);
+    return months.map(mStr => {
+      const data: any = { month: mStr.substring(5,7) + '月' };
+      CATEGORIES.forEach(c => data[c.label] = 0);
       
-      CATEGORIES.forEach(cat => {
-        const qtyKey = `${cat.id}_${cat.isCount ? 'count' : 'weight'}`;
-        const amountKey = `${cat.id}_amount`;
-        const weight = dayEntries.reduce((sum, e) => sum + ((e as any)[qtyKey] || 0), 0);
-        const amount = dayEntries.reduce((sum, e) => sum + ((e as any)[amountKey] || 0), 0);
-        data[cat.id] = weight;
-        data[`${cat.id}_amount`] = amount;
-        data.totalAmount += amount;
-      });
+      // 每個月份獨立進行「每月總結優先 (單一分類層級)」的判斷
+      const monthlyInMonth = entries.filter(e => e.type === 'monthly' && e.date === mStr);
+      const dailyInMonth = entries.filter(e => e.type === 'daily' && e.date.startsWith(mStr));
       
-      return data;
-    });
+      const categoriesWithMonthly = new Set(monthlyInMonth.map(e => e.name));
+      const validDaily = dailyInMonth.filter(e => !categoriesWithMonthly.has(e.name));
 
-    const monthlyEntry = entries.find(e => e.date.startsWith(monthStr) && e.type === 'monthly');
-    let monthlyTotal: any = null;
-    if (monthlyEntry) {
-      monthlyTotal = {
-        date: '月度總計(補登)',
-        totalAmount: 0
-      };
-      CATEGORIES.forEach(cat => {
-        const qtyKey = `${cat.id}_${cat.isCount ? 'count' : 'weight'}`;
-        const amountKey = `${cat.id}_amount`;
-        monthlyTotal[cat.id] = (monthlyEntry as any)[qtyKey] || 0;
-        monthlyTotal[`${cat.id}_amount`] = (monthlyEntry as any)[amountKey] || 0;
-        monthlyTotal.totalAmount += (monthlyEntry as any)[amountKey] || 0;
-      });
-    }
+      const validEntries = [...monthlyInMonth, ...validDaily];
 
-    return { daily, monthlyTotal };
-  }, [entries, currentMonth]);
-
-  const yearlyTrend = useMemo(() => {
-    const start = startOfYear(currentMonth);
-    const end = endOfYear(currentMonth);
-    const months = eachMonthOfInterval({ start, end });
-
-    return months.map(month => {
-      const monthStr = format(month, 'yyyy-MM');
-      const monthEntries = entries.filter(e => e.date.startsWith(monthStr));
-      const data: any = {
-        month: format(month, 'MMM'),
-        total: 0
-      };
-      
-      CATEGORIES.forEach(cat => {
-        const amount = monthEntries.reduce((sum, e) => sum + ((e as any)[`${cat.id}_amount`] || 0), 0);
-        data[cat.id] = amount;
-        data.total += amount;
-      });
-      
-      return data;
-    });
-  }, [entries, currentMonth]);
-
-  const comparisonData = useMemo(() => {
-    const months = Array.from({ length: 12 }, (_, i) => i + 1);
-
-    return months.map(m => {
-      const data: any = { month: `${m}月` };
-      selectedComparisonYears.forEach(y => {
-        const yearMonth = `${y}-${String(m).padStart(2, '0')}`;
-        const monthEntries = entries.filter(e => e.date.startsWith(yearMonth));
-        
-        if (comparisonCategory === 'all') {
-          data[y] = monthEntries.reduce((sum, e) => {
-            return sum + CATEGORIES.reduce((s, cat) => s + ((e as any)[`${cat.id}_amount`] || 0), 0);
-          }, 0);
-        } else {
-          const cat = CATEGORIES.find(c => c.id === comparisonCategory);
-          const qtyKey = cat?.isCount ? `${comparisonCategory}_count` : `${comparisonCategory}_weight`;
-          data[y] = monthEntries.reduce((sum, e) => sum + ((e as any)[qtyKey] || 0), 0);
+      validEntries.forEach(e => {
+        if (data[e.name] !== undefined) {
+          data[e.name] += (e.price * e.quantity);
         }
       });
       return data;
     });
-  }, [entries, selectedComparisonYears, comparisonCategory]);
+  }, [entries, currentYearStr]);
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[#f5f5f0]">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-emerald-600"></div>
-      </div>
-    );
-  }
+  // 3. 以項目為單位的跟年比較：X軸=1~12月，每條線=一個年份，顯示數量(qty)
+  const categoryTrendData = useMemo(() => {
+    // 自動從資料中偵測所有年份
+    const yearsSet = new Set<string>();
+    entries.forEach(e => {
+      const y = e.date?.substring(0, 4);
+      if (y && /^\d{4}$/.test(y)) yearsSet.add(y);
+    });
+    const years = Array.from(yearsSet).sort();
+    const monthNums = Array.from({length: 12}, (_, i) => String(i + 1).padStart(2, '0'));
 
-  if (!user) {
-    return (
-      <div className="min-h-screen bg-[#f5f5f0] flex flex-col items-center justify-center p-4">
-        <motion.div 
-          initial={{ opacity: 0, y: 20 }}
-          animate={{ opacity: 1, y: 0 }}
-          className="max-w-md w-full bg-white p-8 rounded-[32px] shadow-xl text-center"
-        >
-          <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6">
-            <Recycle className="w-10 h-10 text-emerald-600" />
-          </div>
-          <h1 className="text-3xl font-serif font-bold text-gray-900 mb-2">回收金追蹤器</h1>
-          <p className="text-gray-600 mb-8">記錄每日回收收入，為地球盡一份心力。</p>
-          <button
-            onClick={handleLogin}
-            className="w-full flex items-center justify-center gap-3 bg-emerald-600 text-white py-4 rounded-full font-medium hover:bg-emerald-700 transition-colors shadow-lg shadow-emerald-200"
-          >
-            <LogIn className="w-5 h-5" />
-            使用 Google 帳號登入
-          </button>
-        </motion.div>
-      </div>
-    );
-  }
+    return CATEGORIES.map(cat => ({
+      cat,
+      years,
+      data: monthNums.map(m => {
+        const row: Record<string, any> = { month: m + '月' };
+        years.forEach(y => {
+          const mStr = `${y}-${m}`;
+          const monthlyInMonth = entries.filter(e => e.type === 'monthly' && e.date === mStr && e.name === cat.label);
+          const dailyInMonth = entries.filter(e => e.type === 'daily' && e.date.startsWith(mStr) && e.name === cat.label);
+          const valid = monthlyInMonth.length > 0 ? monthlyInMonth : dailyInMonth;
+          const qty = valid.reduce((s, e) => s + e.quantity, 0);
+          row[y] = qty > 0 ? +qty.toFixed(2) : null; // null 諦 recharts 不畫點
+        });
+        return row;
+      })
+    }));
+  }, [entries]);
 
   return (
-    <div className="min-h-screen bg-[#f5f5f0] text-gray-900 font-sans pb-12">
-      {/* Header */}
-      <header className="bg-white border-b border-gray-200 sticky top-0 z-10">
-        <div className="max-w-5xl mx-auto px-4 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <Recycle className="w-6 h-6 text-emerald-600" />
-            <span className="font-serif font-bold text-xl">回收金小幫手</span>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="hidden sm:flex items-center gap-2 mr-4">
-              <img src={user.photoURL || ''} alt="" className="w-8 h-8 rounded-full border border-gray-200" />
-              <span className="text-sm font-medium">{user.displayName}</span>
-            </div>
-            <button
-              onClick={handleLogout}
-              className="p-2 text-gray-500 hover:text-red-600 transition-colors"
-              title="登出"
-            >
-              <LogOut className="w-5 h-5" />
-            </button>
-          </div>
+    <div className="app-container">
+      {toast && (
+        <div className={`alert-toast ${toast.isError ? 'error' : ''}`}>
+          {toast.isError ? <AlertCircle size={20} /> : <Recycle size={20} className="text-emerald-500" />}
+          <span className="font-medium text-sm text-gray-800">{toast.msg}</span>
         </div>
+      )}
+
+      {/* Header */}
+      <header className="header">
+        <div className="header-title">
+          <Recycle size={30} color="#16a34a" />
+          <span>資源回收統計系統</span>
+        </div>
+        {!fetching && <span className="text-muted text-sm flex gap-2" style={{alignItems:'center'}}><div style={{width:8,height:8,borderRadius:'50%',background:'#22c55e',boxShadow:'0 0 6px #22c55e'}} /> 系統連線正常</span>}
+        {fetching && <span className="text-muted text-sm flex gap-2" style={{alignItems:'center'}}><div className="loading-spinner" style={{width: 14, height:14, borderWidth:2}} /> 資料同步中...</span>}
       </header>
 
-      <main className="max-w-5xl mx-auto px-4 py-8">
-        {/* Navigation Tabs */}
-        <div className="flex bg-white p-1 rounded-2xl shadow-sm mb-8 max-w-lg mx-auto">
-          {[
-            { id: 'daily', label: '每日記錄' },
-            { id: 'monthly', label: '月度報表' },
-            { id: 'yearly', label: '年度趨勢' },
-            { id: 'comparison', label: '年度比較' }
-          ].map((v) => (
-            <button
-              key={v.id}
-              onClick={() => setView(v.id as any)}
-              className={cn(
-                "flex-1 py-2 text-sm font-medium rounded-xl transition-all",
-                view === v.id ? "bg-emerald-600 text-white shadow-md" : "text-gray-500 hover:text-gray-700"
-              )}
-            >
-              {v.label}
-            </button>
-          ))}
-        </div>
+      {/* Navigation */}
+      <div className="tabs" style={{width: '100%', borderRadius: '999px', justifyContent: 'center'}}>
+        <button className={`tab-btn ${view === 'input' ? 'active' : ''}`} onClick={() => setView('input')}>
+          <div className="flex items-center gap-2"><Plus size={15}/> 紀錄輸入</div>
+        </button>
+        <button className={`tab-btn ${view === 'monthly_report' ? 'active' : ''}`} onClick={() => setView('monthly_report')}>
+          <div className="flex items-center gap-2"><FileText size={15}/> 月回收紀錄</div>
+        </button>
+        <button className={`tab-btn ${view === 'yearly_report' ? 'active' : ''}`} onClick={() => setView('yearly_report')}>
+          <div className="flex items-center gap-2"><BarChart3 size={15}/> 年回收紀錄</div>
+        </button>
+        <button className={`tab-btn ${view === 'history' ? 'active' : ''}`} onClick={() => setView('history')}>
+          <div className="flex items-center gap-2"><Clock size={15}/> 紀錄管理 / 刪除</div>
+        </button>
+      </div>
 
-        <AnimatePresence mode="wait">
-          {view === 'daily' && (
-            <motion.div
-              key="daily"
-              initial={{ opacity: 0, x: -20 }}
-              animate={{ opacity: 1, x: 0 }}
-              exit={{ opacity: 0, x: 20 }}
-              className="space-y-8"
-            >
-              {/* Entry Form */}
-              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
-                <div className="flex items-center justify-between mb-6">
-                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
-                    <Plus className="w-6 h-6 text-emerald-600" />
-                    新增回收記錄
-                  </h2>
-                  <div className="flex bg-gray-100 p-1 rounded-xl">
-                    <button
-                      type="button"
-                      onClick={() => setEntryType('daily')}
-                      className={cn(
-                        "px-4 py-1.5 text-xs font-bold rounded-lg transition-all",
-                        entryType === 'daily' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500"
-                      )}
-                    >
-                      每日明細
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setEntryType('monthly')}
-                      className={cn(
-                        "px-4 py-1.5 text-xs font-bold rounded-lg transition-all",
-                        entryType === 'monthly' ? "bg-white text-emerald-600 shadow-sm" : "text-gray-500"
-                      )}
-                    >
-                      月度總計
-                    </button>
-                  </div>
-                </div>
-                <form onSubmit={handleSubmit} className="space-y-6">
-                  <div className="max-w-xs space-y-2">
-                    <label className="text-sm font-medium text-gray-700">
-                      {entryType === 'daily' ? '日期' : '月份'}
-                    </label>
-                    <input
-                      type={entryType === 'daily' ? "date" : "month"}
-                      value={entryType === 'daily' ? selectedDate : selectedDate.substring(0, 7)}
-                      onChange={(e) => {
-                        if (entryType === 'daily') {
-                          setSelectedDate(e.target.value);
-                        } else {
-                          setSelectedDate(`${e.target.value}-01`);
-                        }
-                      }}
-                      className="w-full p-3 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 focus:border-transparent outline-none transition-all"
-                      required
-                    />
-                  </div>
+      {/* View: 輸入紀錄 */}
+      {view === 'input' && (
+        <div className="glass-panel" style={{ animation: 'fadeIn 0.4s ease' }}>
+          <div className="flex items-center justify-between mb-8">
+            <h2 className="flex items-center gap-2">
+              {inputType === 'daily' ? '每日回收紀錄輸入' : '每月總結輸入'}
+            </h2>
+            <div className="flex gap-2">
+              <button className="btn btn-outline" style={{padding: '0.4rem 0.8rem', fontSize: '0.85rem'}} onClick={() => setShowImport(true)}>
+                <Upload size={16}/> CSV 匯入
+              </button>
+              <div className="tabs" style={{marginBottom: 0}}>
+                <button className={`tab-btn ${inputType === 'daily' ? 'active' : ''}`} style={{padding: '0.3rem 0.8rem', fontSize: '0.85rem'}} onClick={() => setInputType('daily')}>每日</button>
+                <button className={`tab-btn ${inputType === 'monthly' ? 'active' : ''}`} style={{padding: '0.3rem 0.8rem', fontSize: '0.85rem'}} onClick={() => setInputType('monthly')}>每月</button>
+              </div>
+            </div>
+          </div>
 
-                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                    {CATEGORIES.map((cat) => (
-                      <div key={cat.id} className="p-6 bg-gray-50 rounded-[24px] border border-gray-100 space-y-4">
-                        <h4 className="font-bold text-gray-900 flex items-center gap-2">
-                          <span className={`w-2 h-2 rounded-full bg-${cat.color}-500`} />
-                          {cat.label}
-                        </h4>
-                        <div className="grid grid-cols-2 gap-4">
-                          <div className="space-y-1">
-                            <label className="text-xs font-medium text-gray-500">{cat.isCount ? '數量 (個)' : '重量 (kg)'}</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={formData[`${cat.id}_${cat.isCount ? 'count' : 'weight'}`]}
-                              onChange={(e) => setFormData({ ...formData, [`${cat.id}_${cat.isCount ? 'count' : 'weight'}`]: e.target.value })}
-                              placeholder="0.00"
-                              className="w-full p-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <label className="text-xs font-medium text-gray-500">單價 ($)</label>
-                            <input
-                              type="number"
-                              step="0.01"
-                              value={formData[`${cat.id}_price`]}
-                              onChange={(e) => setFormData({ ...formData, [`${cat.id}_price`]: e.target.value })}
-                              placeholder="0.00"
-                              className="w-full p-2 bg-white border border-gray-200 rounded-xl focus:ring-2 focus:ring-emerald-500 outline-none text-sm"
-                            />
-                          </div>
-                        </div>
-                        <div className="flex justify-between items-center pt-2 border-t border-gray-200/50">
-                          <span className="text-xs text-gray-400">計算金額</span>
-                          <span className="font-bold text-emerald-600">
-                            ${calculateAmount(formData[`${cat.id}_${cat.isCount ? 'count' : 'weight'}`], formData[`${cat.id}_price`])}
-                          </span>
-                        </div>
+          <form onSubmit={handleSubmit}>
+            <div className="form-group" style={{maxWidth: '220px'}}>
+              <label className="form-label">{inputType === 'daily' ? '記錄日期' : '記錄月份'}</label>
+              <div className="flex items-center gap-2">
+                <CalendarDays size={20} className="text-emerald-600"/>
+                <input 
+                  type={inputType === 'daily' ? 'date' : 'month'} 
+                  value={inputType === 'daily' ? selectedDate : selectedDate.substring(0,7)} 
+                  onChange={(e) => {
+                    const v = e.target.value;
+                    setSelectedDate(inputType === 'daily' ? v : `${v}-01`);
+                  }}
+                  className="form-input" 
+                  required 
+                />
+              </div>
+            </div>
+
+            {showDailyFormBlocked ? (
+              <div className="mt-8 p-6 text-center" style={{ background: 'rgba(245, 158, 11, 0.1)', borderRadius: '1rem', border: '1px solid rgba(245, 158, 11, 0.3)'}}>
+                <AlertCircle size={32} className="mx-auto text-amber-500 mb-2"/>
+                <h3 className="text-amber-800 mb-1">{monthString} 已經有「每月回收紀錄」</h3>
+                <p className="text-amber-700 text-sm">系統偵測到該月份已有月總結，依規則省略每日紀錄。如需修改，請切換至「每月」分頁。</p>
+              </div>
+            ) : (
+              <>
+                <div className="category-grid mt-8">
+                  {CATEGORIES.map(cat => (
+                    <div key={cat.id} className={`category-card ${cat.color}`}>
+                      <div className="category-header">
+                        {cat.label}
                       </div>
-                    ))}
-                  </div>
-
-                  <div className="pt-4">
-                    <button
-                      type="submit"
-                      className="w-full bg-emerald-600 text-white py-4 rounded-full font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100"
-                    >
-                      儲存記錄
-                    </button>
-                  </div>
-                </form>
-              </div>
-
-              {/* Recent Entries */}
-              <div className="space-y-4">
-                <h3 className="text-xl font-serif font-bold px-2">最近記錄</h3>
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                  {entries.slice(0, 6).map((entry) => (
-                    <div key={entry.id} className="bg-white p-6 rounded-[24px] shadow-sm border border-gray-100 group relative">
-                      <button
-                        onClick={() => handleDelete(entry.id)}
-                        className="absolute top-4 right-4 p-2 text-gray-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition-all"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
-                      <div className="text-sm text-emerald-600 font-bold mb-2">{format(parseISO(entry.date), 'yyyy/MM/dd')}</div>
-                      <div className="space-y-3">
-                        {CATEGORIES.filter(cat => (entry as any)[`${cat.id}_amount`] > 0).slice(0, 4).map((cat, i) => (
-                          <div key={i} className="flex flex-col text-sm">
-                            <div className="flex justify-between items-center">
-                              <span className="text-gray-500">{cat.label}</span>
-                              <span className="font-medium">${(entry as any)[`${cat.id}_amount`].toFixed(2)}</span>
-                            </div>
-                            <div className="text-[10px] text-gray-400 flex gap-2">
-                              <span>{cat.isCount ? '數量' : '重量'}: {(entry as any)[`${cat.id}_${cat.isCount ? 'count' : 'weight'}`]}{cat.isCount ? '個' : 'kg'}</span>
-                              <span>單價: ${(entry as any)[`${cat.id}_price`]}</span>
-                            </div>
-                          </div>
-                        ))}
-                        {CATEGORIES.filter(cat => (entry as any)[`${cat.id}_amount`] > 0).length > 4 && (
-                          <div className="text-[10px] text-gray-400 text-center">... 還有更多項目</div>
-                        )}
-                        <div className="pt-3 border-t border-gray-50 flex justify-between font-bold text-emerald-700">
-                          <span>總計</span>
-                          <span>${CATEGORIES.reduce((sum, cat) => sum + (entry as any)[`${cat.id}_amount`], 0).toFixed(2)}</span>
-                        </div>
-                        <button 
-                          onClick={() => setShowReceipt(entry)}
-                          className="w-full mt-2 py-2 text-xs font-bold text-emerald-600 border border-emerald-100 rounded-xl hover:bg-emerald-50 transition-all"
-                        >
-                          查看收據範本
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {view === 'monthly' && (
-            <motion.div
-              key="monthly"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="space-y-8"
-            >
-              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
-                <div className="flex items-center justify-between mb-8">
-                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
-                    <CalendarIcon className="w-6 h-6 text-emerald-600" />
-                    月度報表
-                  </h2>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={() => setShowImportModal(true)}
-                      className="flex items-center gap-2 px-4 py-2 bg-white border border-gray-200 rounded-2xl text-sm font-medium hover:bg-gray-50 transition-all shadow-sm"
-                    >
-                      <Upload className="w-4 h-4 text-emerald-600" />
-                      批次匯入
-                    </button>
-                    <div className="flex items-center gap-4 bg-gray-50 p-2 rounded-2xl">
-                      <button 
-                        onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() - 1)))}
-                        className="p-2 hover:bg-white rounded-xl transition-all"
-                      >
-                        <ChevronLeft className="w-5 h-5" />
-                      </button>
-                      <span className="font-bold min-w-[120px] text-center">{format(currentMonth, 'yyyy年 MMMM')}</span>
-                      <button 
-                        onClick={() => setCurrentMonth(new Date(currentMonth.setMonth(currentMonth.getMonth() + 1)))}
-                        className="p-2 hover:bg-white rounded-xl transition-all"
-                      >
-                        <ChevronRight className="w-5 h-5" />
-                      </button>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="h-[300px] w-full mb-8">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={monthlyData.daily}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="date" axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                      <YAxis axisLine={false} tickLine={false} tick={{ fontSize: 10 }} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                        formatter={(value: any, name: string) => {
-                          const cat = CATEGORIES.find(c => c.label === name);
-                          return [`${value} ${cat?.isCount ? '個' : 'kg'}`, name];
-                        }}
-                      />
-                      <Legend iconType="circle" />
-                      {CATEGORIES.slice(0, 5).map((cat, idx) => (
-                        <Bar 
-                          key={cat.id}
-                          name={cat.label} 
-                          dataKey={cat.id} 
-                          stackId="a" 
-                          fill={
-                            cat.color === 'emerald' ? '#10b981' : 
-                            cat.color === 'blue' ? '#3b82f6' : 
-                            cat.color === 'amber' ? '#f59e0b' : 
-                            cat.color === 'orange' ? '#f97316' : 
-                            '#06b6d4'
-                          } 
-                        />
-                      ))}
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-                        <th className="pb-4 pl-2">日期</th>
-                        {CATEGORIES.map(cat => (
-                          <th key={cat.id} className="pb-4 px-2">{cat.label}({cat.isCount ? '個' : 'kg'})</th>
-                        ))}
-                        <th className="pb-4 pr-2 text-right">總金額</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {monthlyData.daily.filter(d => d.totalAmount > 0).map((day, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                          <td className="py-4 pl-2 font-medium text-xs whitespace-nowrap">{day.date}</td>
-                          {CATEGORIES.map(cat => (
-                            <td key={cat.id} className="py-4 px-2 text-[10px] text-gray-600">
-                              {day[cat.id] > 0 ? day[cat.id].toFixed(1) : '-'}
-                            </td>
-                          ))}
-                          <td className="py-4 pr-2 text-right font-bold text-emerald-600 text-xs">${day.totalAmount.toFixed(2)}</td>
-                        </tr>
-                      ))}
-                      {monthlyData.monthlyTotal && (
-                        <tr className="bg-amber-50/50 italic">
-                          <td className="py-4 pl-2 font-bold text-xs whitespace-nowrap text-amber-700">{monthlyData.monthlyTotal.date}</td>
-                          {CATEGORIES.map(cat => (
-                            <td key={cat.id} className="py-4 px-2 text-[10px] text-amber-700 font-medium">
-                              {monthlyData.monthlyTotal[cat.id] > 0 ? monthlyData.monthlyTotal[cat.id].toFixed(1) : '-'}
-                            </td>
-                          ))}
-                          <td className="py-4 pr-2 text-right font-bold text-amber-700 text-xs">${monthlyData.monthlyTotal.totalAmount.toFixed(2)}</td>
-                        </tr>
-                      )}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-emerald-50 font-bold">
-                        <td className="py-4 pl-2 rounded-l-2xl text-xs">總結</td>
-                        {CATEGORIES.map(cat => {
-                          const dailySum = monthlyData.daily.reduce((s, d) => s + d[cat.id], 0);
-                          const monthlySum = monthlyData.monthlyTotal ? monthlyData.monthlyTotal[cat.id] : 0;
-                          return (
-                            <td key={cat.id} className="py-4 px-2 text-[10px]">
-                              {(dailySum + monthlySum).toFixed(1)}
-                            </td>
-                          );
-                        })}
-                        <td className="py-4 pr-2 text-right rounded-r-2xl text-emerald-700 text-xs">
-                          ${(
-                            monthlyData.daily.reduce((s, d) => s + d.totalAmount, 0) + 
-                            (monthlyData.monthlyTotal ? monthlyData.monthlyTotal.totalAmount : 0)
-                          ).toFixed(2)}
-                        </td>
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            </motion.div>
-          )}
-
-          {view === 'yearly' && (
-            <motion.div
-              key="yearly"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-              className="space-y-8"
-            >
-              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
-                <div className="flex items-center justify-between mb-8">
-                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
-                    <TrendingUp className="w-6 h-6 text-emerald-600" />
-                    年度趨勢分析
-                  </h2>
-                  <div className="bg-gray-50 px-4 py-2 rounded-2xl font-bold">
-                    {format(currentMonth, 'yyyy年')}
-                  </div>
-                </div>
-
-                <div className="h-[400px] w-full">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <LineChart data={yearlyTrend}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                      <YAxis axisLine={false} tickLine={false} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                      />
-                      <Legend iconType="circle" />
-                      {CATEGORIES.slice(0, 5).map((cat, idx) => (
-                        <Line 
-                          key={cat.id}
-                          name={cat.label} 
-                          type="monotone" 
-                          dataKey={cat.id} 
-                          stroke={
-                            cat.color === 'emerald' ? '#10b981' : 
-                            cat.color === 'blue' ? '#3b82f6' : 
-                            cat.color === 'amber' ? '#f59e0b' : 
-                            cat.color === 'orange' ? '#f97316' : 
-                            '#06b6d4'
-                          } 
-                          strokeWidth={3} 
-                          dot={{ r: 4 }} 
-                          activeDot={{ r: 6 }} 
-                        />
-                      ))}
-                      <Line name="總計" type="monotone" dataKey="total" stroke="#111827" strokeWidth={4} strokeDasharray="5 5" dot={false} />
-                    </LineChart>
-                  </ResponsiveContainer>
-                </div>
-
-                <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-6 gap-4 mt-8">
-                  {CATEGORIES.map((cat) => (
-                    <div key={cat.id} className="p-4 rounded-2xl text-center bg-gray-50 border border-gray-100">
-                      <div className="text-xs font-bold uppercase opacity-70 mb-1">{cat.label}總計</div>
-                      <div className="text-xl font-bold text-gray-900">
-                        ${yearlyTrend.reduce((s, m) => s + (m[cat.id] || 0), 0).toFixed(0)}
-                      </div>
-                    </div>
-                  ))}
-                  <div className="p-4 rounded-2xl text-center bg-emerald-600 text-white col-span-2 sm:col-span-4 lg:col-span-1">
-                    <div className="text-xs font-bold uppercase opacity-90 mb-1">年度總金額</div>
-                    <div className="text-xl font-bold">
-                      ${yearlyTrend.reduce((s, m) => s + m.total, 0).toFixed(0)}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </motion.div>
-          )}
-          {view === 'comparison' && (
-            <motion.div
-              key="comparison"
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              className="space-y-8"
-            >
-              <div className="bg-white p-8 rounded-[32px] shadow-sm border border-gray-100">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 mb-8">
-                  <h2 className="text-2xl font-serif font-bold flex items-center gap-2">
-                    <TrendingUp className="w-6 h-6 text-emerald-600" />
-                    年度數據比較
-                  </h2>
-                  <div className="flex flex-wrap items-center gap-3">
-                    <select 
-                      value={comparisonCategory}
-                      onChange={(e) => setComparisonCategory(e.target.value)}
-                      className="px-4 py-2 bg-gray-50 border border-gray-200 rounded-2xl text-sm font-bold outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      <option value="all">全部項目 (金額)</option>
-                      {CATEGORIES.map(cat => (
-                        <option key={cat.id} value={cat.id}>{cat.label} ({cat.isCount ? '數量' : '重量'})</option>
-                      ))}
-                    </select>
-                    <div className="flex flex-wrap items-center gap-2 bg-gray-50 p-1 rounded-2xl border border-gray-200">
-                      {availableYears.map(year => (
-                        <button
-                          key={year}
-                          onClick={() => {
-                            if (selectedComparisonYears.includes(year)) {
-                              setSelectedComparisonYears(selectedComparisonYears.filter(y => y !== year));
-                            } else {
-                              setSelectedComparisonYears([...selectedComparisonYears, year].sort());
-                            }
-                          }}
-                          className={cn(
-                            "px-3 py-1.5 text-xs font-bold rounded-xl transition-all",
-                            selectedComparisonYears.includes(year) 
-                              ? "bg-white text-emerald-600 shadow-sm" 
-                              : "text-gray-400 hover:text-gray-600"
-                          )}
-                        >
-                          {year}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="h-[400px] w-full mb-8">
-                  <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={comparisonData}>
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f0f0f0" />
-                      <XAxis dataKey="month" axisLine={false} tickLine={false} />
-                      <YAxis axisLine={false} tickLine={false} />
-                      <Tooltip 
-                        contentStyle={{ borderRadius: '16px', border: 'none', boxShadow: '0 10px 15px -3px rgba(0,0,0,0.1)' }}
-                        formatter={(value: any, name: string) => {
-                          const unit = comparisonCategory === 'all' ? '$' : (CATEGORIES.find(c => c.id === comparisonCategory)?.isCount ? '個' : 'kg');
-                          return [comparisonCategory === 'all' ? `$${value.toFixed(0)}` : `${value.toFixed(1)} ${unit}`, name];
-                        }}
-                      />
-                      <Legend iconType="circle" />
-                      {selectedComparisonYears.map((year, idx) => {
-                        const colors = ['#10b981', '#3b82f6', '#f59e0b', '#f97316', '#8b5cf6', '#ec4899'];
-                        return (
-                          <Bar 
-                            key={year}
-                            name={`${year}年`} 
-                            dataKey={year.toString()} 
-                            fill={colors[idx % colors.length]} 
-                            radius={[4, 4, 0, 0]} 
+                      <div className="category-inputs">
+                        <div className="flex-col gap-2">
+                          <label className="text-xs text-muted">{cat.id === 'dialysis' ? '洗腎次數 (次)' : (cat.isCount ? '數量 (個)' : '重量 (kg)')}</label>
+                          <input 
+                            type="number" 
+                            step="0.01" 
+                            className="form-input" 
+                            placeholder="0"
+                            value={formData[`${cat.id}_qty`]} 
+                            onChange={(e) => setFormData({...formData, [`${cat.id}_qty`]: e.target.value})} 
                           />
-                        );
-                      })}
-                    </BarChart>
-                  </ResponsiveContainer>
+                        </div>
+                        <div className="flex-col gap-2">
+                          <label className="text-xs text-muted">單價 ($)</label>
+                          <input 
+                            type="number" 
+                            step="0.01" 
+                            className="form-input" 
+                            placeholder="0.0"
+                            value={formData[`${cat.id}_price`]} 
+                            onChange={(e) => setFormData({...formData, [`${cat.id}_price`]: e.target.value})} 
+                          />
+                        </div>
+                      </div>
+                      <div className="mt-4 text-right">
+                        <span className="text-xs text-muted font-medium">小計: </span>
+                        <span className="font-bold text-emerald-600">
+                          ${ (Number(formData[`${cat.id}_qty`]) * Number(formData[`${cat.id}_price`]) || 0).toFixed(2) }
+                        </span>
+                      </div>
+                    </div>
+                  ))}
                 </div>
 
-                <div className="overflow-x-auto">
-                  <table className="w-full text-left border-collapse">
-                    <thead>
-                      <tr className="text-[10px] font-bold text-gray-400 uppercase tracking-wider border-b border-gray-100">
-                        <th className="pb-4 pl-2">月份</th>
-                        {selectedComparisonYears.map(year => (
-                          <th key={year} className="pb-4 px-2 text-right">{year}年</th>
-                        ))}
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-gray-50">
-                      {comparisonData.map((row, idx) => (
-                        <tr key={idx} className="hover:bg-gray-50 transition-colors">
-                          <td className="py-4 pl-2 font-medium text-xs">{row.month}</td>
-                          {selectedComparisonYears.map(year => (
-                            <td key={year} className="py-4 px-2 text-right text-xs font-mono">
-                              {comparisonCategory === 'all' ? `$${(row[year] || 0).toFixed(0)}` : (row[year] || 0).toFixed(1)}
-                            </td>
-                          ))}
-                        </tr>
+                <div className="mt-8 flex justify-end">
+                  <button type="submit" className="btn btn-primary" disabled={loading}>
+                    {loading ? <div className="loading-spinner" style={{width: 18, height: 18, borderWidth: 2, borderColor: 'rgba(255,255,255,0.3)', borderTopColor: 'white'}}></div> : <Plus size={20} />}
+                    {loading ? '儲存中...' : '儲存紀錄'}
+                  </button>
+                </div>
+              </>
+            )}
+          </form>
+        </div>
+      )}
+
+      {/* View: 月報表 */}
+      {view === 'monthly_report' && (
+        <div className="glass-panel" style={{ animation: 'fadeIn 0.4s ease' }}>
+          <div className="flex items-center justify-between mb-6">
+            <h2>{monthString} 回收明細表</h2>
+            <input 
+              type="month" 
+              className="form-input" 
+              style={{width: '180px'}} 
+              value={selectedDate.substring(0,7)} 
+              onChange={(e) => setSelectedDate(`${e.target.value}-01`)} 
+            />
+          </div>
+
+          {monthReportData.length === 0 ? (
+            <div className="p-8 text-center text-muted">這個月份尚無任何回收資料。</div>
+          ) : (
+            <div className="glass-table-wrapper">
+              <table className="glass-table">
+                <thead>
+                  <tr>
+                    <th>日期</th>
+                    {CATEGORIES.map(c => <th key={c.id}>{c.label} (單日量/金額)</th>)}
+                    <th className="text-right">日總計</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthReportData.map((row, idx) => (
+                    <tr key={idx}>
+                      <td className="font-medium">{row.date}</td>
+                      {CATEGORIES.map(c => (
+                        <td key={c.id}>
+                          {row[c.label] ? (
+                            <div>
+                              <span className="font-bold">{Number(row[c.label]).toFixed(1)}</span> {c.id === 'dialysis' ? '次' : (c.isCount ? '個' : 'kg')}
+                              <div className="text-xs text-muted">${Number(row[`${c.label}金額`]).toFixed(1)}</div>
+                            </div>
+                          ) : '-'}
+                        </td>
                       ))}
-                    </tbody>
-                    <tfoot>
-                      <tr className="bg-gray-50 font-bold">
-                        <td className="py-4 pl-2 rounded-l-2xl text-xs">年度總計</td>
-                        {selectedComparisonYears.map(year => {
-                          const total = comparisonData.reduce((sum, row) => sum + (row[year] || 0), 0);
-                          return (
-                            <td key={year} className={cn(
-                              "py-4 px-2 text-right text-sm",
-                              year === 2025 ? "text-emerald-600" : "text-gray-900"
-                            )}>
-                              {comparisonCategory === 'all' ? `$${total.toLocaleString()}` : total.toFixed(1)}
-                            </td>
-                          );
-                        })}
-                      </tr>
-                    </tfoot>
-                  </table>
-                </div>
-              </div>
-            </motion.div>
+                      <td className="text-right font-bold text-emerald-600">${Number(row.total).toFixed(1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </AnimatePresence>
-      </main>
+        </div>
+      )}
 
-      {/* Receipt Modal */}
-      <AnimatePresence>
-        {showReceipt && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setShowReceipt(null)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-[#fff9e6] w-full max-w-sm p-8 rounded-sm shadow-2xl border-2 border-[#d4c59a] relative overflow-hidden"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {/* Paper Texture Effect */}
-              <div className="absolute inset-0 opacity-5 pointer-events-none bg-[url('https://www.transparenttextures.com/patterns/paper-fibers.png')]" />
-              
-              <div className="relative z-10 font-serif text-[#4a3f2a]">
-                <div className="text-center mb-6">
-                  <h2 className="text-2xl font-bold tracking-[0.2em] mb-1">仟環資源回收</h2>
-                  <div className="flex justify-between text-xs border-b border-[#4a3f2a]/30 pb-2">
-                    <span>寶號: {user?.displayName}</span>
-                    <span>{showReceipt.type === 'monthly' ? format(parseISO(showReceipt.date), 'yyyy年 MM月') : format(parseISO(showReceipt.date), 'yyyy年 MM月 dd日')}</span>
-                  </div>
-                </div>
+      {/* View: 年報表 */}
+      {view === 'yearly_report' && (
+        <div className="glass-panel" style={{ animation: 'fadeIn 0.4s ease' }}>
+          <div className="flex items-center justify-between mb-6">
+            <h2>回收趨勢比較</h2>
+            <div className="flex items-center gap-3">
+              <div className="tabs" style={{marginBottom: 0}}>
+                <button
+                  className={`tab-btn ${yearlySubView === 'overview' ? 'active' : ''}`}
+                  style={{padding: '0.3rem 0.9rem', fontSize: '0.85rem'}}
+                  onClick={() => setYearlySubView('overview')}
+                >綜合總覽</button>
+                <button
+                  className={`tab-btn ${yearlySubView === 'by_category' ? 'active' : ''}`}
+                  style={{padding: '0.3rem 0.9rem', fontSize: '0.85rem'}}
+                  onClick={() => setYearlySubView('by_category')}
+                >項目比較</button>
+              </div>
+              {/* 綜合總覽才需要選年 */}
+              {yearlySubView === 'overview' && (
+                <input
+                  type="number"
+                  className="form-input"
+                  style={{width: '110px'}}
+                  value={currentYearStr}
+                  onChange={(e) => setSelectedDate(`${e.target.value}-01-01`)}
+                  min="2000" max="2100"
+                />
+              )}
+            </div>
+          </div>
 
-                  <table className="w-full text-sm border-collapse border border-[#4a3f2a]/40">
-                    <thead>
-                      <tr className="bg-[#f2e8c4]">
-                        <th className="border border-[#4a3f2a]/40 p-1 font-bold">品名</th>
-                        <th className="border border-[#4a3f2a]/40 p-1 font-bold">數量</th>
-                        <th className="border border-[#4a3f2a]/40 p-1 font-bold">單價</th>
-                        <th className="border border-[#4a3f2a]/40 p-1 font-bold">金額</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {CATEGORIES.map((cat, i) => {
-                        const amount = (showReceipt as any)[`${cat.id}_amount`];
-                        const qty = (showReceipt as any)[`${cat.id}_${cat.isCount ? 'count' : 'weight'}`];
-                        const price = (showReceipt as any)[`${cat.id}_price`];
-                        
-                        if (!amount || amount === 0) return null;
+          {/* 綜合總覽：原有 BarChart */}
+          {yearlySubView === 'overview' && (
+            <div style={{ height: 400, width: '100%', padding: '1rem', background: 'rgba(255,255,255,0.3)', borderRadius: '1rem' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={yearlyTrendData} margin={{ top: 20, right: 30, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                  <XAxis dataKey="month" stroke="#64748b" tickMargin={10} axisLine={false} tickLine={false} />
+                  <YAxis stroke="#64748b" axisLine={false} tickLine={false} tickFormatter={(value) => `$${value}`} />
+                  <Tooltip
+                    cursor={{fill: 'rgba(0,0,0,0.03)'}}
+                    contentStyle={{ borderRadius: '12px', border: 'none', boxShadow: '0 10px 25px -5px rgba(0,0,0,0.1)' }}
+                    formatter={(value: any, name: string) => [`$${Number(value).toFixed(1)}`, name]}
+                  />
+                  <Legend wrapperStyle={{ paddingTop: '20px' }}/>
+                  <Bar dataKey="紙" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="鋁鐵罐" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="塑膠" fill="#14b8a6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="洗腎桶" fill="#e11d48" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="廢油" fill="#8b5cf6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
 
-                        return (
-                          <tr key={i} className="h-8">
-                            <td className="border border-[#4a3f2a]/40 p-1 text-center font-bold">{cat.label}</td>
-                            <td className="border border-[#4a3f2a]/40 p-1 text-center">{qty}{cat.isCount ? '個' : 'kg'}</td>
-                            <td className="border border-[#4a3f2a]/40 p-1 text-center">{price}</td>
-                            <td className="border border-[#4a3f2a]/40 p-1 text-right">{amount.toFixed(0)}</td>
-                          </tr>
-                        );
-                      })}
-                      {/* Add empty rows to maintain receipt look if only few items */}
-                      {CATEGORIES.filter(cat => (showReceipt as any)[`${cat.id}_amount`] > 0).length < 5 && 
-                        Array.from({ length: 5 - CATEGORIES.filter(cat => (showReceipt as any)[`${cat.id}_amount`] > 0).length }).map((_, i) => (
-                          <tr key={`empty-${i}`} className="h-8">
-                            <td className="border border-[#4a3f2a]/40 p-1"></td>
-                            <td className="border border-[#4a3f2a]/40 p-1"></td>
-                            <td className="border border-[#4a3f2a]/40 p-1"></td>
-                            <td className="border border-[#4a3f2a]/40 p-1"></td>
-                          </tr>
-                        ))
-                      }
-                    </tbody>
-                  </table>
+          {/* 項目比較：每個類別一張跨年度 LineChart，X軸=月份，每條線=年份 */}
+          {yearlySubView === 'by_category' && (() => {
+            const CAT_COLORS: Record<string, string> = {
+              '紙': '#3b82f6', '鋁鐵罐': '#f59e0b', '塑膠': '#14b8a6', '洗腎桶': '#e11d48', '廢油': '#8b5cf6',
+            };
+            // 年份配色盤：客製化 (灰色、藍色、橘色、紅色)
+            const YEAR_PALETTE = [
+              '#94a3b8', // 灰 (2022)
+              '#3b82f6', // 藍 (2023)
+              '#f97316', // 橘 (2024)
+              '#ef4444', // 紅 (2025)
+              '#64748b', // 備用1: 深灰
+              '#0284c7', // 備用2: 深藍
+              '#ea580c', // 備用3: 深橘
+              '#b91c1c'  // 備用4: 深紅
+            ];
+            return (
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '1.5rem' }}>
+                {categoryTrendData.map(({ cat, years, data }) => {
+                  const catColor = CAT_COLORS[cat.label] || '#64748b';
+                  const unit = cat.id === 'dialysis' ? '次' : cat.isCount ? '個' : 'kg';
+                  const hasAnyData = data.some(row => years.some(y => row[y] !== null && row[y] > 0));
+                  return (
+                    <div key={cat.id} style={{
+                      background: 'rgba(255,255,255,0.45)',
+                      backdropFilter: 'blur(8px)',
+                      borderRadius: '1rem',
+                      padding: '1.25rem 1.25rem 0.75rem',
+                      border: `1.5px solid ${catColor}28`,
+                      boxShadow: `0 8px 24px ${catColor}12, inset 0 1px 0 rgba(255,255,255,0.6)`
+                    }}>
+                      {/* 標題 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem', marginBottom: '0.8rem' }}>
+                        <div style={{ width: 12, height: 12, borderRadius: '50%', background: catColor, flexShrink: 0, boxShadow: `0 0 8px ${catColor}80` }} />
+                        <span style={{ fontWeight: 800, fontSize: '1.05rem', color: '#1e293b' }}>{cat.label}</span>
+                        <span style={{ fontSize: '0.8rem', color: '#94a3b8', marginLeft: 2, fontWeight: 600 }}>({unit})</span>
+                        {!hasAnyData && <span style={{ fontSize: '0.75rem', color: '#cbd5e1', marginLeft: 'auto', fontWeight: 600 }}>尚無資料</span>}
+                      </div>
 
-                <div className="mt-6 flex justify-between items-end border-t-2 border-[#4a3f2a]/20 pt-4">
-                  <div className="text-[10px] opacity-60">
-                    電話: 0960622573
-                  </div>
-                  <div className="text-lg font-bold flex items-baseline gap-2">
-                    <span className="text-xs">合計 NT$</span>
-                    <span className="text-2xl underline decoration-double underline-offset-4">
-                      {CATEGORIES.reduce((sum, cat) => sum + (showReceipt as any)[`${cat.id}_amount`], 0).toFixed(0)}
-                    </span>
-                  </div>
-                </div>
+                      {/* 年份 Legend */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem 1rem', marginBottom: '1rem' }}>
+                        {years.map((y, i) => (
+                          <div key={y} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', color: '#475569', fontWeight: 600 }}>
+                            <div style={{ width: 14, height: 4, borderRadius: 2, background: YEAR_PALETTE[i % YEAR_PALETTE.length] }} />
+                            {y}年
+                          </div>
+                        ))}
+                      </div>
 
+                      {/* Chart */}
+                      <div style={{ height: 230 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                          <LineChart data={data} margin={{ top: 10, right: 10, left: -15, bottom: 0 }}>
+                            <CartesianGrid strokeDasharray="4 4" stroke="rgba(0,0,0,0.05)" vertical={false} />
+                            <XAxis
+                              dataKey="month"
+                              tick={{ fontSize: 11, fill: '#64748b', fontWeight: 500 }}
+                              axisLine={false} tickLine={false}
+                              tickMargin={8}
+                            />
+                            <YAxis
+                              tick={{ fontSize: 10, fill: '#94a3b8', fontWeight: 500 }}
+                              axisLine={false} tickLine={false}
+                              tickFormatter={(v) => `${v}`}
+                              tickMargin={8}
+                            />
+                            <Tooltip
+                              contentStyle={{ borderRadius: '12px', border: '1px solid rgba(255,255,255,0.5)', background: 'rgba(255,255,255,0.9)', backdropFilter: 'blur(8px)', boxShadow: '0 10px 25px rgba(0,0,0,0.1)', fontSize: '0.85rem', fontWeight: 600 }}
+                              formatter={(value: any, name: string) => [
+                                value !== null ? `${value}${unit}` : '-',
+                                name + '年'
+                              ]}
+                              itemSorter={(item: any) => -(item.value ?? 0)}
+                            />
+                            {years.map((y, i) => (
+                              <Line
+                                key={y}
+                                type="monotone"
+                                dataKey={y}
+                                name={y}
+                                stroke={YEAR_PALETTE[i % YEAR_PALETTE.length]}
+                                strokeWidth={2.5}
+                                dot={{ r: 4, strokeWidth: 2, fill: '#fff', stroke: YEAR_PALETTE[i % YEAR_PALETTE.length] }}
+                                activeDot={{ r: 6, strokeWidth: 0, fill: YEAR_PALETTE[i % YEAR_PALETTE.length] }}
+                                connectNulls={false}
+                              />
+                            ))}
+                          </LineChart>
+                        </ResponsiveContainer>
+                      </div>
+
+                      {/* 年度小計 */}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.25rem 1rem', padding: '0.5rem 0 0', borderTop: '1px solid rgba(0,0,0,0.06)', marginTop: '0.5rem' }}>
+                        {years.map((y, i) => {
+                          const total = data.reduce((s, row) => s + (row[y] ?? 0), 0);
+                          return total > 0 ? (
+                            <span key={y} style={{ fontSize: '0.78rem', color: YEAR_PALETTE[i % YEAR_PALETTE.length], fontWeight: 600 }}>
+                              {y}: {total.toFixed(1)}{unit}
+                            </span>
+                          ) : null;
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            );
+          })()}
+
+          <div style={{marginTop:'1.5rem',padding:'1rem',background:'rgba(0,0,0,0.07)',borderRadius:'0.75rem',fontSize:'0.73rem',fontFamily:'monospace'}}>
+            <strong style={{color:'#c026d3'}}>🔍 Debug - 每月工作表原始欄位名稱 (Google Sheets key names):</strong>
+            {rawDebug.map((row, i) => (
+              <pre key={i} style={{marginTop:'0.5rem',whiteSpace:'pre-wrap',color:'#334155',wordBreak:'break-all'}}>
+                {JSON.stringify(row, null, 2)}
+              </pre>
+            ))}
+            {rawDebug.length === 0 && <div style={{color:'#94a3b8',marginTop:'0.5rem'}}>尚未載入每月資料...</div>}
+          </div>
+        </div>
+      )}
+
+      {/* View: 歷史紀錄管理 / 刪除 */}
+      {view === 'history' && (
+        <div className="glass-panel" style={{ animation: 'fadeIn 0.4s ease' }}>
+          <div className="flex items-center justify-between mb-6">
+            <h2 className="flex items-center gap-2">
+              <Clock size={24} className="text-emerald-600"/>
+              歷史紀錄與刪除管理
+            </h2>
+            {selectedIds.size > 0 && (
+              <button 
+                className="btn btn-outline" 
+                style={{borderColor: '#f43f5e', color: '#f43f5e', padding: '0.4rem 0.8rem', fontSize: '0.85rem'}}
+                onClick={() => handleBatchDelete(entries.filter(e => selectedIds.has(`${e.type}-${e.no}`)))}
+                disabled={loading}
+              >
+                <Trash2 size={16}/> 批次刪除 ({selectedIds.size})
+              </button>
+            )}
+          </div>
+          <p className="text-muted text-sm mb-6">這裡會依照新增時間列出我們儲存的所有單筆明細。若不小心打錯或是匯入重複資料，您可以直接點擊右側的垃圾桶圖示將其真實刪除。<strong>(此操作無法復原)</strong></p>
+
+          <div className="flex items-center gap-4 mb-4" style={{background: 'rgba(255,255,255,0.4)', padding: '0.8rem 1rem', borderRadius: '0.8rem'}}>
+            <Search className="text-emerald-600" size={20} />
+            <input 
+              type="text" 
+              className="form-input flex-1 m-0"
+              style={{border: 'none', background: 'transparent', boxShadow: 'none'}}
+              placeholder="輸入關鍵字以篩選資料 (如：紙、2026-03、或是匯入時間 10:45)..."
+              value={historySearch}
+              onChange={e => {
+                setHistorySearch(e.target.value);
+                setHistoryPage(1);
+                setSelectedIds(new Set());
+              }}
+            />
+          </div>
+
+          <div className="glass-table-wrapper" style={{ maxHeight: '600px', overflowY: 'auto' }}>
+            <table className="glass-table">
+              <thead style={{ position: 'sticky', top: 0, zIndex: 10 }}>
+                <tr>
+                  <th style={{ width: '40px' }}>
+                    <input 
+                      type="checkbox" 
+                      style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                      checked={selectedIds.size === currentHistoryPageData.length && currentHistoryPageData.length > 0}
+                      onChange={(e) => {
+                        if (e.target.checked) setSelectedIds(new Set(currentHistoryPageData.map(r => `${r.type}-${r.no}`)));
+                        else setSelectedIds(new Set());
+                      }}
+                    />
+                  </th>
+                  <th>NO.</th>
+                  <th>匯入時間</th>
+                  <th>類型</th>
+                  <th>日期</th>
+                  <th>項目名稱</th>
+                  <th>單價</th>
+                  <th>數量/重量</th>
+                  <th>小計金額</th>
+                  <th className="text-right">操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {currentHistoryPageData.length === 0 && (
+                  <tr>
+                    <td colSpan={9} className="text-center p-8 text-muted">尚未有匹配的資料</td>
+                  </tr>
+                )}
+                {currentHistoryPageData.map((req, idx) => {
+                  const idStr = `${req.type}-${req.no}`;
+                  return (
+                  <tr key={`${idStr}-${idx}`}>
+                    <td>
+                      <input 
+                        type="checkbox" 
+                        style={{ transform: 'scale(1.2)', cursor: 'pointer' }}
+                        checked={selectedIds.has(idStr)} 
+                        onChange={() => toggleSelection(idStr)} 
+                      />
+                    </td>
+                    <td className="text-muted text-sm">#{req.no}</td>
+                    <td className="text-xs text-muted font-medium">{req.createdAt || '-'}</td>
+                    <td>
+                      <span className={`px-2 py-1 rounded text-xs font-bold ${req.type==='daily' ? 'bg-blue-100 text-blue-700' : 'bg-purple-100 text-purple-700'}`}>
+                        {req.type === 'daily' ? '每日' : '每月'}
+                      </span>
+                    </td>
+                    <td className="font-medium">{req.date}</td>
+                    <td className="font-bold text-gray-700">{req.name}</td>
+                    <td>${req.price}</td>
+                    <td>{req.quantity}</td>
+                    <td className="font-bold text-emerald-600">${(req.price * req.quantity).toFixed(2)}</td>
+                    <td className="text-right">
+                      <button 
+                        onClick={() => handleBatchDelete([req])}
+                        disabled={loading}
+                        className="p-2 text-rose-500 hover:bg-rose-50 rounded-lg transition-colors inline-block"
+                        title="刪除此筆資料"
+                      >
+                        {loading && selectedIds.size === 0 ? <div className="loading-spinner" style={{width: 14, height:14, borderWidth:2, borderColor:'rgba(244,63,94,0.3)', borderTopColor:'#f43f5e'}}></div> : <Trash2 size={18} />}
+                      </button>
+                    </td>
+                  </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+
+          {totalHistoryPages > 1 && (
+            <div className="flex items-center justify-between mt-6">
+              <span className="text-sm text-muted">
+                顯示第 {(historyPage - 1) * ITEMS_PER_PAGE + 1} 筆到第 {Math.min(historyPage * ITEMS_PER_PAGE, filteredHistory.length)} 筆，共 {filteredHistory.length} 筆資料
+              </span>
+              <div className="flex items-center gap-2">
                 <button 
-                  onClick={() => setShowReceipt(null)}
-                  className="w-full mt-8 py-2 bg-[#4a3f2a] text-[#fff9e6] rounded-sm font-bold hover:opacity-90 transition-all"
+                  className="btn btn-outline p-2" 
+                  disabled={historyPage === 1}
+                  onClick={() => setHistoryPage(p => Math.max(1, p - 1))}
                 >
-                  關閉
+                  <ChevronLeft size={18} />
+                </button>
+                <div className="px-3 py-1 font-medium text-emerald-700 bg-emerald-50 rounded-lg">
+                  {historyPage} / {totalHistoryPages}
+                </div>
+                <button 
+                  className="btn btn-outline p-2" 
+                  disabled={historyPage === totalHistoryPages}
+                  onClick={() => setHistoryPage(p => Math.min(totalHistoryPages, p + 1))}
+                >
+                  <ChevronRight size={18} />
                 </button>
               </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            </div>
+          )}
+        </div>
+      )}
 
-      {/* Import Modal */}
-      <AnimatePresence>
-        {showImportModal && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
-            onClick={() => setShowImportModal(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.9, y: 20 }}
-              animate={{ scale: 1, y: 0 }}
-              exit={{ scale: 0.9, y: 20 }}
-              className="bg-white w-full max-w-2xl p-8 rounded-[32px] shadow-2xl relative"
-              onClick={(e) => e.stopPropagation()}
-            >
+      {/* Modal: CSV Import */}
+      {showImport && (
+        <div className="modal-overlay" onClick={(e) => { if(e.target === e.currentTarget) setShowImport(false) }}>
+          <div className="modal-content">
+            <h3 className="text-xl mb-4 font-bold flex items-center gap-2">
+              <Upload className="text-emerald-500"/>
+              匯入文字 / CSV 資料
+            </h3>
+            <p className="text-sm text-muted mb-4">
+              請輸入資料（各欄位可用逗號(,)或Tab隔開）。<br/>
+              <strong>格式要求：</strong> 日期,名稱,單價,數量/重量<br/>
+              <em>範例：2026-03-29, 塑膠, 2.5, 9.6</em><br/>
+            </p>
+            <textarea 
+              className="textarea-input"
+              value={importText}
+              onChange={e => setImportText(e.target.value)}
+              placeholder="2026-03-29,紙,1.5,12.5&#10;2026-03-29,塑膠,2.0,8.2"
+            ></textarea>
+
+            <div className="flex justify-end gap-3 mt-6">
               <button 
-                onClick={() => setShowImportModal(false)}
-                className="absolute top-6 right-6 p-2 text-gray-400 hover:text-gray-600 transition-all"
+                className="btn" 
+                style={{background: 'rgba(0,0,0,0.05)'}}
+                onClick={() => setShowImport(false)}
               >
-                <X className="w-6 h-6" />
+                取消
               </button>
-
-              <div className="flex items-center gap-3 mb-6">
-                <div className="w-12 h-12 bg-emerald-100 rounded-2xl flex items-center justify-center">
-                  <FileText className="w-6 h-6 text-emerald-600" />
-                </div>
-                <div>
-                  <h3 className="text-xl font-serif font-bold">批次匯入資料</h3>
-                  <p className="text-sm text-gray-500">請貼上文字資料進行解析與匯入</p>
-                </div>
-              </div>
-
-              <div className="space-y-4">
-                <div className="bg-amber-50 border border-amber-100 p-4 rounded-2xl text-xs text-amber-800 space-y-1">
-                  <p className="font-bold flex items-center gap-1">
-                    <AlertCircle className="w-3 h-3" /> 匯入說明：
-                  </p>
-                  <p>1. 支援直接讀取 PDF 檔案或貼上文字。</p>
-                  <p>2. 格式：<code className="bg-amber-100 px-1 rounded">日期 [項目] 單價 重量</code> (總價由系統自動計算)</p>
-                  <p>3. 每日範例：<code className="bg-amber-100 px-1 rounded">9月1日 紙 1.945 248</code></p>
-                  <p>4. 月度範例：<code className="bg-amber-100 px-1 rounded">2024/12 報紙 2.5 1500</code></p>
-                  <p>項目可填：紙, 瓶罐, 鐵罐, 鋁罐, 塑膠, 電器, 鐵, 鋁, 報紙, 洗腎桶, 廢油</p>
-                </div>
-
-                <div className="flex items-center gap-4">
-                  <label className="flex-1 flex items-center justify-center gap-2 p-4 border-2 border-dashed border-gray-200 rounded-2xl hover:border-emerald-500 hover:bg-emerald-50 transition-all cursor-pointer group">
-                    <Upload className="w-5 h-5 text-gray-400 group-hover:text-emerald-600" />
-                    <span className="text-sm font-medium text-gray-600 group-hover:text-emerald-700">
-                      {isReadingPDF ? '讀取中...' : '選擇 PDF 檔案'}
-                    </span>
-                    <input 
-                      type="file" 
-                      accept=".pdf" 
-                      onChange={handlePDFUpload} 
-                      className="hidden" 
-                      disabled={isReadingPDF}
-                    />
-                  </label>
-                  <button
-                    onClick={() => setImportText('')}
-                    className="p-4 text-gray-400 hover:text-red-500 transition-all"
-                    title="清除文字"
-                  >
-                    <Trash2 className="w-5 h-5" />
-                  </button>
-                </div>
-
-                <textarea
-                  value={importText}
-                  onChange={(e) => setImportText(e.target.value)}
-                  placeholder="在此貼上資料內容，或從上方上傳 PDF..."
-                  className="w-full h-64 p-4 bg-gray-50 border border-gray-200 rounded-2xl focus:ring-2 focus:ring-emerald-500 outline-none font-mono text-sm resize-none"
-                />
-
-                {importStatus.success && (
-                  <div className="flex items-center gap-2 text-emerald-600 text-sm font-bold bg-emerald-50 p-3 rounded-xl">
-                    <CheckCircle2 className="w-4 h-4" />
-                    {importStatus.success}
-                  </div>
-                )}
-
-                {importStatus.error && (
-                  <div className="flex items-center gap-2 text-red-600 text-sm font-bold bg-red-50 p-3 rounded-xl">
-                    <AlertCircle className="w-4 h-4" />
-                    {importStatus.error}
-                  </div>
-                )}
-
-                <div className="flex gap-4 pt-2">
-                  <button
-                    onClick={() => setShowImportModal(false)}
-                    className="flex-1 py-4 text-gray-500 font-bold hover:bg-gray-50 rounded-full transition-all"
-                  >
-                    取消
-                  </button>
-                  <button
-                    onClick={handleBatchImport}
-                    disabled={isImporting || !importText.trim()}
-                    className="flex-2 bg-emerald-600 text-white py-4 px-8 rounded-full font-bold hover:bg-emerald-700 transition-all shadow-lg shadow-emerald-100 disabled:opacity-50 disabled:shadow-none"
-                  >
-                    {isImporting ? '處理中...' : '開始匯入'}
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+              <button 
+                className="btn btn-primary" 
+                onClick={handleImport}
+                disabled={loading}
+              >
+                {loading ? '匯入中...' : '確認匯入'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
