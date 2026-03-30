@@ -747,15 +747,7 @@ export default function App() {
             );
           })()}
 
-          <div style={{marginTop:'1.5rem',padding:'1rem',background:'rgba(0,0,0,0.07)',borderRadius:'0.75rem',fontSize:'0.73rem',fontFamily:'monospace'}}>
-            <strong style={{color:'#c026d3'}}>🔍 Debug - 每月工作表原始欄位名稱 (Google Sheets key names):</strong>
-            {rawDebug.map((row, i) => (
-              <pre key={i} style={{marginTop:'0.5rem',whiteSpace:'pre-wrap',color:'#334155',wordBreak:'break-all'}}>
-                {JSON.stringify(row, null, 2)}
-              </pre>
-            ))}
-            {rawDebug.length === 0 && <div style={{color:'#94a3b8',marginTop:'0.5rem'}}>尚未載入每月資料...</div>}
-          </div>
+
         </div>
       )}
 
